@@ -555,7 +555,7 @@ function todaySessionCard(sess, done) {
     const nx = nextSessionFrom(new Date());
     return `<div class="sess-hero"><div class="top"><span class="pill">Rest day</span>${nx ? `<span class="label">Next · ${DAYS[wd(nx.date)]} ${fmtDate(nx.date)}</span>` : ''}</div>
       <h3 id="t-sess">Recover and reset.</h3><p class="ink2">Rest days are when strength is actually built. An easy walk and ten minutes of mobility is plenty.</p>
-      <ul class="mini-list" style="margin:18px 0">${EXTRA_BLOCK.mobility.text.map(([a, b]) => `<li><span>${a}</span><span>${b}</span></li>`).join('')}</ul>
+      <ul class="mini-list" style="margin:18px 0">${EXTRA_BLOCK.mobility.text.map(([a, b]) => `<li><span>${formName(a)}</span><span>${b}</span></li>`).join('')}</ul>
       <div class="acts">${nx ? `<button class="btn btn-ghost" data-act="start-anyway">Train anyway: ${esc(nx.sess.name)}</button>` : ''}<a class="btn btn-quiet" href="#/plan">See the week</a></div></div>`;
   }
   const c = S.log.check[ds], band = c ? readyBand(readiness(c)) : null;
@@ -564,7 +564,7 @@ function todaySessionCard(sess, done) {
     <h3 id="t-sess">${esc(sess.name)}</h3>
     <div class="sess-meta"><span>${IC.clock}≈ ${sess.mins} min</span><span>${IC.list}${plural(sess.exs.length, 'exercise')}</span><span>${IC.bolt}RPE ${sess.exs[0] ? sess.exs[0].rpe : ''}${rpeAdj}</span></div>
     ${band && band.k === 'bad' ? `<div class="acwr" style="margin-top:18px;background:var(--bad-bg)"><span style="color:var(--bad)">${IC.alert.replace('<svg', '<svg width="20" height="20"')}</span><p><b>Readiness is low.</b> ${band.d}</p></div>` : ''}
-    <ol class="ex-peek">${sess.exs.slice(0, 4).map((e, i) => `<li><span class="i">0${i + 1}</span><span>${esc(e.n)}</span><span class="sr2">${e.sets} × ${e.reps}</span></li>`).join('')}
+    <ol class="ex-peek">${sess.exs.slice(0, 4).map((e, i) => `<li><span class="i">0${i + 1}</span><span>${formName(e.n)}</span><span class="sr2">${e.sets} × ${e.reps}</span></li>`).join('')}
       ${sess.exs.length > 4 ? `<li><span class="i"></span><span class="muted">+ ${sess.exs.length - 4} more${sess.prep ? ` and ${esc(sess.prep.sport.split(' (')[0].toLowerCase())} prep` : ''}</span><span></span></li>` : ''}</ol>
     <div class="acts"><button class="btn btn-primary btn-lg" data-act="start">${IC.play}Start session</button><a class="btn btn-ghost btn-lg" href="#/plan">Full session</a></div></div>`;
 }
@@ -642,21 +642,21 @@ function sessionDetail(sess, date, done, isToday) {
   return `<div class="sess-head"><div><div class="label">${DAYS_L[wd(date)]} · ${fmtDate(date)} · ${sess.phase.n}</div><h3>${esc(sess.name)}</h3><p class="muted" style="margin-top:2px">${esc(sess.focus)} · ${esc(sess.phase.d.toLowerCase())}</p></div>
       <div class="ph-actions">${done ? `<span class="pill good">${IC.check.replace('<svg', '<svg width="12" height="12"')} Logged · RPE ${done.rpe}</span>` : ''}<span class="pill line">${IC.clock.replace('<svg', '<svg width="12" height="12"')} ≈ ${sess.mins} min</span><span class="pill line" data-tip="Rate of perceived exertion, 1 to 10">RPE ${rpe}</span>
       ${isToday && !done ? `<button class="btn btn-primary btn-sm" data-act="start">${IC.play}Start</button>` : ''}</div></div>
-    <div class="sess-sec"><div class="label"><span>Warm-up · RAMP · 6 min</span></div><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${b}</span></span><span>${c}</span></li>`).join('')}</ul></div>
+    <div class="sess-sec"><div class="label"><span>Warm-up · RAMP · 6 min</span></div><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${formLinks(b)}</span></span><span>${c}</span></li>`).join('')}</ul></div>
     <div class="sess-sec"><div class="label"><span>Main work · ${plural(sess.exs.length, 'exercise')}</span><span class="hide-m">Sets × reps · rest · effort</span></div>
       ${sess.exs.map((e, i) => `<div class="ex" data-ex="${esc(e.key)}"><span class="i">${String(i + 1).padStart(2, '0')}</span>
-        <div style="min-width:0"><h5>${esc(e.n)}</h5><p>${esc(e.cue)}</p></div>
+        <div class="ex-main">${formThumb(e.n)}<div style="min-width:0"><h5>${esc(e.n)}</h5><p>${esc(e.cue)}</p>${formOf(e.n) ? `<button type="button" class="ex-form" data-act="form" data-n="${esc(e.n)}">${PLAY}Watch form</button>` : ''}</div></div>
         <div class="spec"><div><b>${e.sets} × ${e.reps}</b><span>Sets × reps</span></div><div><b>${restTxt(e.rest)}</b><span>Rest</span></div><div><b>${e.rpe}</b><span>RPE</span></div>
         ${e.alts > 1 ? `<button class="icon-btn sm" data-act="swap" data-key="${esc(e.key)}" data-n="${esc(e.n)}" aria-label="Swap ${esc(e.n)} for an alternative" data-tip="Swap exercise">${IC.swap}</button>` : '<span style="width:32px"></span>'}</div></div>`).join('')}</div>
-    ${sess.prep ? `<div class="sess-sec"><div class="label"><span>${esc(sess.prep.sport.split(' (')[0])} prep · 5 min</span><span>Injury prevention</span></div><ul class="mini-list">${sess.prep.items.map(([a, b]) => `<li><span>${esc(a)}</span><span>${esc(b)}</span></li>`).join('')}</ul></div>` : ''}
-    ${sess.blocks.map(b => `<div class="sess-sec"><div class="label"><span>${esc(b.t)} · ${b.min} min</span><span>${esc(b.why)}</span></div><ul class="mini-list">${b.items.map(([a, c]) => `<li><span>${esc(a)}</span><span>${esc(c)}</span></li>`).join('')}</ul></div>`).join('')}
+    ${sess.prep ? `<div class="sess-sec"><div class="label"><span>${esc(sess.prep.sport.split(' (')[0])} prep · 5 min</span><span>Injury prevention</span></div><ul class="mini-list">${sess.prep.items.map(([a, b]) => `<li><span>${formName(a)}</span><span>${esc(b)}</span></li>`).join('')}</ul></div>` : ''}
+    ${sess.blocks.map(b => `<div class="sess-sec"><div class="label"><span>${esc(b.t)} · ${b.min} min</span><span>${esc(b.why)}</span></div><ul class="mini-list">${b.items.map(([a, c]) => `<li><span>${formName(a)}</span><span>${esc(c)}</span></li>`).join('')}</ul></div>`).join('')}
     <div class="sess-sec"><div class="label"><span>Cool-down · 3 min</span></div><ul class="mini-list"><li><span>Slow nasal breathing, lying down</span><span>90 s</span></li><li><span>Stretch whatever feels tight</span><span>90 s</span></li></ul></div>`;
 }
 function restDetail(date) {
   const nx = nextSessionFrom(date);
   return `<div class="empty"><div class="glyph">${IC.bed}</div><h4>${DAYS_L[wd(date)]} is a rest day</h4>
     <p>No lifting planned. Light movement helps: a 20-minute walk, easy skill work for your sport, or the mobility flow below.</p>
-    <ul class="mini-list" style="width:100%;max-width:420px;margin-top:8px;text-align:left">${EXTRA_BLOCK.mobility.text.map(([a, b]) => `<li><span>${a}</span><span>${b}</span></li>`).join('')}</ul>
+    <ul class="mini-list" style="width:100%;max-width:420px;margin-top:8px;text-align:left">${EXTRA_BLOCK.mobility.text.map(([a, b]) => `<li><span>${formName(a)}</span><span>${b}</span></li>`).join('')}</ul>
     ${nx ? `<div class="acts"><button class="btn btn-ghost btn-sm" data-act="plan-goto" data-d="${iso(nx.date)}">Next up: ${esc(nx.sess.name)}, ${DAYS[wd(nx.date)]} ${IC.arrow}</button></div>` : ''}</div>`;
 }
 
@@ -681,9 +681,9 @@ VIEWS.session = () => {
   return `<div class="ph"><div><div class="label">Ready when you are</div><h2 style="margin-top:8px">${esc(sess.name)}</h2><p>${esc(sess.focus)} · ${plural(tot, 'set')} · about ${sess.mins} minutes</p></div>
     <div class="ph-actions"><button class="btn btn-primary btn-lg" data-act="start">${IC.play}Start session</button></div></div>
     <div class="dash">
-      <div class="card c-5"><div class="card-h"><h3>Warm up first</h3><span class="label">6 min</span></div><div class="card-b"><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${b}</span></span><span>${c}</span></li>`).join('')}</ul></div></div>
-      <div class="card c-7"><div class="card-h"><h3>What is coming</h3><span class="label">${sess.phase.n} week</span></div><div class="card-b"><ol class="ex-peek" style="margin:0">${sess.exs.map((e, i) => `<li><span class="i">${String(i + 1).padStart(2, '0')}</span><span>${esc(e.n)}</span><span class="sr2">${e.sets} × ${e.reps}</span></li>`).join('')}</ol>
-      <p class="muted" style="font-size:13px;margin-top:14px">Tap each set as you finish it. A rest timer starts automatically.</p></div></div>
+      <div class="card c-5"><div class="card-h"><h3>Warm up first</h3><span class="label">6 min</span></div><div class="card-b"><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${formLinks(b)}</span></span><span>${c}</span></li>`).join('')}</ul></div></div>
+      <div class="card c-7"><div class="card-h"><h3>What is coming</h3><span class="label">${sess.phase.n} week</span></div><div class="card-b"><ol class="ex-peek" style="margin:0">${sess.exs.map((e, i) => `<li><span class="i">${String(i + 1).padStart(2, '0')}</span><span>${formName(e.n)}</span><span class="sr2">${e.sets} × ${e.reps}</span></li>`).join('')}</ol>
+      <p class="muted" style="font-size:13px;margin-top:14px">Tap any exercise to watch how it is done. During the session, tap each set as you finish it.</p></div></div>
     </div>`;
 };
 function liveSession() {
@@ -698,12 +698,12 @@ function liveSession() {
     ${sess.exs.map(e => {
       const arr = a.sets[e.key] || [], complete = arr.filter(Boolean).length >= e.sets, last = lastKg(e.n), kg = a.kg[e.n] ?? last ?? '';
       return `<div class="lx ${complete ? 'complete' : ''}" data-lx="${esc(e.key)}">
-        <div class="lx-top"><div><h5><span class="tickc">${IC.check}</span>${esc(e.n)}</h5><p>${e.sets} × ${e.reps} · rest ${restTxt(e.rest)} · RPE ${e.rpe} · ${esc(e.cue)}</p></div></div>
+        <div class="lx-top">${formThumb(e.n, 'sm')}<div style="min-width:0"><h5><span class="tickc">${IC.check}</span>${esc(e.n)}</h5><p>${e.sets} × ${e.reps} · rest ${restTxt(e.rest)} · RPE ${e.rpe} · ${esc(e.cue)}</p></div></div>
         <div class="lx-row"><div class="sets" role="group" aria-label="Sets for ${esc(e.n)}">${Array.from({ length: e.sets }, (_, j) => `<button class="set" data-act="set" data-key="${esc(e.key)}" data-j="${j}" aria-pressed="${!!arr[j]}" aria-label="Set ${j + 1} of ${e.sets}">${arr[j] ? IC.check.replace('<svg', '<svg width="15" height="15"') : `Set ${j + 1}`}</button>`).join('')}</div>
         ${isLoaded(e) ? `<div class="kg"><button data-act="kg" data-n="${esc(e.n)}" data-v="-2.5" aria-label="Decrease weight">${IC.minus}</button><input type="number" inputmode="decimal" step="0.5" min="0" data-kg="${esc(e.n)}" value="${kg}" placeholder="0" aria-label="Weight in kilograms for ${esc(e.n)}"><span class="u">kg</span><button data-act="kg" data-n="${esc(e.n)}" data-v="2.5" aria-label="Increase weight">${IC.plus}</button></div>` : ''}</div>
         ${last ? `<div class="last" style="margin-top:10px">Last time: ${fmt1(last)} kg</div>` : ''}</div>`;
     }).join('')}
-    ${extras.map(x => `<div class="lx"><div class="label" style="margin-bottom:8px">${esc(x.t)} · optional</div><ul class="mini-list">${x.items.map(([n, r]) => `<li><span>${esc(n)}</span><span>${esc(r)}</span></li>`).join('')}</ul></div>`).join('')}
+    ${extras.map(x => `<div class="lx"><div class="label" style="margin-bottom:8px">${esc(x.t)} · optional</div><ul class="mini-list">${x.items.map(([n, r]) => `<li><span>${formName(n)}</span><span>${esc(r)}</span></li>`).join('')}</ul></div>`).join('')}
     <div class="card-f" style="padding:16px 22px"><button class="btn btn-quiet" data-act="discard">${IC.trash}Discard</button><button class="btn btn-primary btn-lg" data-act="finish">Finish session ${IC.arrow}</button></div>
   </div>`;
 }
@@ -1116,6 +1116,7 @@ function commands(q) {
     list.push({ group: 'Actions', label: 'Add a custom food', icon: IC.plus, k: 'meal', run: () => { UI.fuelDate = today(); navigate('fuel'); setTimeout(customFoodModal, 350); } });
     list.push({ group: 'Actions', label: 'Edit plan inputs', icon: IC.edit, k: 'rebuild settings', run: () => navigate('start') });
     list.push({ group: 'Actions', label: 'Export my data', icon: IC.download, k: 'backup json', run: () => ACT.export() });
+    if (q && q.length > 2) Object.keys(FORM).filter(n => n.toLowerCase().includes(q)).slice(0, 5).forEach(n => list.push({ group: 'Exercise form', label: `How to do ${esc(n)}`, icon: IC.play, always: true, run: () => formModal(n) }));
     if (q && q.length > 1) {
       Object.entries(FOODS).filter(([id, f]) => f[0].toLowerCase().includes(q)).slice(0, 6).forEach(([id, f]) => list.push({ group: 'Log food', label: `Log ${esc(f[0])}`, hint: `${fmtN(f[2])} kcal`, icon: IC.fuel, always: true, run: () => { UI.fuelDate = today(); addFood(id); if (UI.view === 'fuel') refresh(); toast(`Added <b>${esc(f[0])}</b> · ${fmtN(f[2])} kcal`, { action: { label: 'View', fn: () => navigate('fuel') } }); } }));
     }
