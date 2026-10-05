@@ -26,7 +26,7 @@ const FAQ = [
   ['I am 14. Is lifting safe at my age?', 'Supervised strength training is widely recommended for teenagers. Pulse starts newer lifters at moderate effort, focuses on technique in the Base week and never programmes maximal lifts. If you have an injury or a health condition, check with a coach, parent or doctor first.'],
   ['Does it work for vegetarian or vegan athletes?', 'Yes. Meal ideas and the food search respect vegetarian, vegan and pescatarian diets, and skip anything containing allergens you list, from dairy and gluten to peanuts and sesame. The foods are the ones you actually eat, like dal, paneer, poha and idli.'],
   ['How does the morning check-in change my session?', 'Sleep, soreness and energy combine into a readiness score out of 100. Above 70 you train as planned. Between 45 and 70 Pulse tells you to stay at the low end of the effort range. Below 45 it suggests a recovery day instead.'],
-  ['Where is my data stored?', 'Only in this browser, on this device. Nothing is sent to a server. Clearing your browser data removes it, so use Export in Profile if you want a backup or want to move to another device.']
+  ['Where is my data stored?', 'As a guest, only in this browser on this device. With an account, your plan is saved to your school’s secure Pulse database so it follows you to any device. Coaches for your sports see a progress summary only: sessions, weigh-in trend, water, protein and readiness. Your food log, meal plan and exercises stay private.']
 ];
 
 let landingCleanup = [];
@@ -58,7 +58,7 @@ function showLanding(section) {
         <div class="hero-cta">
           ${have ? `<a class="btn btn-primary btn-lg" href="#/today">Open my plan ${IC.arrow}</a><a class="btn btn-ghost btn-lg" href="#/start">Rebuild it</a>` : `<a class="btn btn-primary btn-lg" href="#/start">Build my plan ${IC.arrow}</a><a class="btn btn-ghost btn-lg" href="#/sample">Explore a sample athlete</a>`}
         </div>
-        <div class="hero-meta"><span>${IC.check}Free, no account</span><span>${IC.check}About two minutes</span><span>${IC.check}Data stays on your device</span></div>
+        <div class="hero-meta"><span>${IC.check}Free for students</span><span>${IC.check}About two minutes</span><span>${IC.check}Coaches see progress, not your food log</span></div>
       </div>
       <div class="demo" aria-label="Interactive readiness demo">
         <div class="demo-card">
@@ -296,7 +296,7 @@ ACT.legal = el => {
   const p = el.dataset.v === 'privacy';
   openModal({
     title: p ? 'Privacy' : 'Terms of use', size: 560,
-    body: `<div class="prose">${p ? `<p>Pulse has no accounts and no server. Everything you enter, from your profile to your food logs, is stored in your browser’s local storage on this device.</p><h4>What we collect</h4><p>Nothing. There are no analytics, cookies or trackers. Fonts are loaded from Google Fonts, which receives a standard web request when the page loads.</p><h4>Your control</h4><p>Export your data as a file, or delete everything, from the Profile page at any time.</p>`
+    body: `<div class="prose">${p ? `<p>As a guest, everything you enter is stored only in your browser on this device. If you create an account, your plan and logs are saved to the school’s Pulse database (Google Firebase) so you can use them on any device.</p><h4>What coaches see</h4><p>Coaches for the sports you play at your school see a progress summary: sessions done, weigh-in trend, water, protein and readiness percentages, and supplement requests with the doctor’s note you send. They do not see your food log, meal plan, exercises or chats with Ask Pulse.</p><h4>What we collect</h4><p>No analytics, ads or trackers. Fonts load from Google Fonts.</p><h4>Your control</h4><p>Export or delete your data from the Profile page at any time.</p>`
       : `<p>Pulse provides general training and nutrition guidance for educational purposes. It is not medical advice and does not replace a qualified coach, doctor or dietitian.</p><h4>Train safely</h4><p>Use good technique, train with supervision where possible and stop if you feel pain. If you are under 18, check with a parent or guardian before starting a new programme.</p><h4>No warranty</h4><p>Pulse is provided as is. You are responsible for how you use the plans it generates.</p>`}</div>`,
     actions: [{ label: 'Close', kind: 'btn-primary' }]
   });
