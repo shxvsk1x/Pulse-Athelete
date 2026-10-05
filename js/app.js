@@ -3,7 +3,7 @@
    ========================================================= */
 
 const LS = 'pulse.v3', LS_DRAFT = 'pulse.draft', LS_PREFS = 'pulse.prefs', LS_THEME = 'pulse.theme';
-const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'profile'];
+const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'profile'];
 const LANDING_SECTIONS = ['method', 'product', 'block', 'science', 'faq'];
 const VIEW_META = {
   today: { t: 'Today', ic: 'today' },
@@ -11,6 +11,8 @@ const VIEW_META = {
   session: { t: 'Session', ic: 'session' },
   fuel: { t: 'Fuel', ic: 'fuel' },
   progress: { t: 'Progress', ic: 'progress' },
+  ask: { t: 'Ask Pulse', ic: 'chat' },
+  coach: { t: 'Coach', ic: 'coach' },
   profile: { t: 'Profile', ic: 'profile' }
 };
 
@@ -20,8 +22,9 @@ let PREFS = { sound: true };
 const UI = {
   screen: null, view: null, obStep: 0, draft: null, errors: {}, rebuilding: false,
   planWeek: null, planDay: null, fuelDate: null, foodQ: '', foodFilter: 'all', foodSort: 'match', dietOnly: true, mealShift: 0,
-  histFilter: 'all', justDone: null, ci: null, editCheck: false
+  histFilter: 'all', justDone: null, ci: null, editCheck: false, kitCat: 'all'
 };
+const stateKey = () => Cloud.user && Cloud.user.role === 'student' ? LS + '.u.' + Cloud.user.uid : LS;
 
 /* ---------- persistence ---------- */
 const store = {
@@ -35,18 +38,21 @@ function save() {
   const cut = iso(addDays(new Date(), -90));
   for (const k of Object.keys(S.log.food)) if (k < cut) delete S.log.food[k];
   for (const k of Object.keys(S.log.water)) if (k < cut) delete S.log.water[k];
-  if (!store.set(LS, S)) toast('Could not save on this device. Storage may be full or blocked.', { type: 'err' });
+  for (const k of Object.keys(S.log.drinks || {})) if (k < cut) delete S.log.drinks[k];
+  if (!store.set(stateKey(), S)) toast('Could not save on this device. Storage may be full or blocked.', { type: 'err' });
   REAL = S;
+  if (typeof Sync !== 'undefined') Sync.schedule();
 }
 function freshState(profile) {
-  return { v: 3, profile, swaps: {}, active: null, badges: {}, log: { sessions: [], weight: [{ date: today(), kg: +profile.weight }], food: {}, water: {}, check: {} }, updatedAt: Date.now() };
+  return { v: 3, profile, swaps: {}, active: null, badges: {}, glasses: [], supps: [], mealSwaps: {}, adjust: [], log: { sessions: [], weight: [{ date: today(), kg: +profile.weight }], food: {}, water: {}, drinks: {}, check: {} }, updatedAt: Date.now() };
 }
 function blankDraft() {
-  return { name: '', age: '', sex: 'm', height: '', weight: '', climate: 'mild', goal: '', extra: [], sports: [], exp: 'beg', sessions: 3, minutes: 45, days: [], where: 'school', equip: ['dumbbell', 'bench', 'band'], diet: 'all', allergies: '', injuries: '' };
+  const u = Cloud.user || {};
+  return { name: u.name ? String(u.name).split(' ')[0] : '', age: '', sex: 'm', height: '', weight: '', climate: 'mild', school: u.school || ((PULSE_CONFIG.schools || [])[0] || {}).id || '', grade: u.grade || '', goal: '', extra: [], sports: [], exp: 'beg', sessions: 3, minutes: 45, days: [], where: 'school', gear: [], equip: [], diet: 'all', allergies: '', injuries: '' };
 }
 function sampleState() {
   const created = addDays(mondayOf(new Date()), -14);
-  const profile = { name: 'Aarav', age: 16, sex: 'm', height: 174, weight: 63, climate: 'hot', goal: 'speed', extra: ['muscle'], sports: ['football', 'athletics'], exp: 'int', sessions: 4, minutes: 60, days: [], where: 'school', equip: ['dumbbell', 'barbell', 'rack', 'bench', 'pullup', 'band', 'box', 'medball'], diet: 'veg', allergies: '', injuries: '', createdAt: created.getTime() };
+  const profile = { name: 'Aarav', age: 16, sex: 'm', height: 174, weight: 63, climate: 'hot', goal: 'speed', extra: ['muscle'], sports: ['football', 'athletics'], exp: 'int', sessions: 4, minutes: 60, days: [], where: 'school', gear: ['dumbbells', 'barbell', 'squat-rack', 'adj-bench', 'pullup-bar', 'bands', 'plyo-box', 'medball', 'lat-pulldown', 'leg-press', 'rower'], equip: [], school: 'vasant-valley', grade: '11', diet: 'veg', allergies: '', injuries: '', createdAt: created.getTime() };
   const st = freshState(profile); st.sample = true;
   const days = DEFAULT_DAYS[4];
   st.log.weight = [];
@@ -66,7 +72,8 @@ function sampleState() {
     });
   }
   st.log.food[today()] = [{ id: 'poha', s: 1, meal: 'Breakfast' }, { id: 'curd', s: 1, meal: 'Breakfast' }, { id: 'banana', s: 1, meal: 'Snack' }];
-  st.log.water[today()] = 4;
+  st.log.drinks[today()] = [{ ml: 250, at: Date.now() - 5 * 36e5 }, { ml: 500, at: Date.now() - 3 * 36e5 }, { ml: 250, at: Date.now() - 2 * 36e5 }];
+  st.supps = [{ id: 'sp1', key: 'whey', name: 'Whey protein', dose: '1 scoop (25 g) after training', status: 'active', at: Date.now() - 864e6, log: {} }];
   st.log.check[today()] = { sleep: 7.5, sore: 2, energy: 4 };
   for (let i = 1; i < 5; i++) st.log.check[iso(addDays(new Date(), -i))] = { sleep: 7 + (i % 2) * .5, sore: 2, energy: 3 + (i % 2) };
   st.badges = { first: iso(addDays(created, -42)), five: iso(addDays(created, -30)), ten: iso(addDays(created, -16)), quarter: iso(addDays(created, 10)), week: iso(addDays(created, 4)), aware: iso(addDays(created, 2)) };
@@ -132,7 +139,7 @@ function lastKg(name) {
 }
 const litres = n => { const v = n * 0.25; return v % 1 === 0 ? v.toFixed(1) : String(+v.toFixed(2)); };
 const restTxt = s => s >= 120 ? mmss(s) : s + ' s';
-const isLoaded = e => !['core', 'carry', 'power'].includes(e.pat) || /swing|carry|slam|chest pass/i.test(e.n);
+const isLoaded = e => (!['core', 'carry', 'power'].includes(e.pat) || /swing|carry|slam|chest pass|clean|push press/i.test(e.n)) && !/ s$/.test(e.reps) && !/Nordic|Wall sit|band walk|ball hamstring/i.test(e.n);
 function mealIdeas(p, ds, shift = 0) {
   const seed = parseIso(ds).getDate(), out = {};
   for (const [m, list] of Object.entries(MEALS)) {
@@ -161,7 +168,7 @@ const MILESTONES = [
   ['quarter', 'Twenty-five', '25 sessions. A real habit.', st => st.log.sessions.length >= 25],
   ['week', 'Full week', 'Every planned session in a week', st => weekDone(mondayOf(new Date())) >= trainingDays(st.profile).length],
   ['streak', 'Three in a row', 'Three full weeks back to back', () => weekStreak() >= 3],
-  ['hydrated', 'Hydrated', 'Hit your water target in a day', st => (st.log.water[today()] || 0) >= Math.round(targets(st.profile, !!sessionFor(new Date())).water / 250)],
+  ['hydrated', 'Hydrated', 'Hit your water target in a day', st => waterMl(today()) >= targets(st.profile, !!sessionFor(new Date())).water],
   ['protein', 'Protein on point', 'Hit your protein target in a day', st => sumFoods(st.log.food[today()] || []).p >= targets(st.profile).protein],
   ['aware', 'Self-aware', 'Three readiness check-ins', st => Object.keys(st.log.check).length >= 3]
 ];
@@ -180,6 +187,8 @@ function checkMilestones() {
    ROUTER
    ========================================================= */
 function parseHash() { const h = location.hash.replace(/^#\/?/, ''); const [path, q] = h.split('?'); return { path: path || '', q: new URLSearchParams(q || '') }; }
+const entered = () => !!Cloud.user || store.get('pulse.entry') === 'guest';
+function leaveSample() { if (S && S.sample) { S = REAL; setSampleFlag(false); stopRest(); } }
 function navigate(path) { const h = '#/' + path; if (location.hash === h) route(); else location.hash = h; }
 let leaveHooks = [];
 function onLeave(fn) { leaveHooks.push(fn); }
@@ -189,16 +198,25 @@ function route() {
   if (cmdk) cmdk.close();
   modalStack.slice().forEach(m => m.close());
 
+  if (path === 'welcome') { leaveSample(); return showWelcome(); }
+  if (path === 'login' || path === 'signup') { leaveSample(); return showAuth(path); }
+  if (Cloud.user && Cloud.user.role === 'coach' && path !== 'about' && !LANDING_SECTIONS.includes(path)) { leaveSample(); return showCoachApp(path); }
   if (path === 'sample') { stopRest(); S = sampleState(); setSampleFlag(true); UI.planWeek = UI.planDay = null; UI.screen = null; history.replaceState(null, '', '#/today'); return showApp('today'); }
-  if (path === 'start') { if (S && S.sample) { S = REAL; setSampleFlag(false); } return showOnboarding(); }
+  if (path === 'start') { leaveSample(); if (!entered()) return showWelcome(); return showOnboarding(); }
   if (APP_VIEWS.includes(path)) {
     if (!hasPlan() && sampleFlag()) S = sampleState();
     if (!hasPlan()) { S = REAL; }
-    if (!hasPlan()) { toast('Build your plan first. It takes about two minutes.'); history.replaceState(null, '', '#/start'); return showOnboarding(); }
+    if (!hasPlan()) { if (!entered()) return showWelcome(); toast('Build your plan first. It takes about two minutes.'); history.replaceState(null, '', '#/start'); return showOnboarding(); }
     return showApp(path);
   }
-  // landing (optionally scrolled to a section)
-  if (S && S.sample) { S = REAL; setSampleFlag(false); stopRest(); }
+  if (path === '') {
+    leaveSample();
+    if (!entered()) return showWelcome();
+    history.replaceState(null, '', REAL && REAL.profile ? '#/today' : '#/start');
+    return route();
+  }
+  // about page (optionally scrolled to a section)
+  leaveSample();
   showLanding(LANDING_SECTIONS.includes(path) ? path : null);
 }
 
@@ -218,7 +236,8 @@ const OB = [
   { k: 'you', t: 'About you', h: 'First, <em>the basics.</em>', s: 'Pulse uses these to work out your energy needs and set sensible starting loads.' },
   { k: 'goal', t: 'Goal', h: 'What are you <em>training for?</em>', s: 'Pick one main goal. Add up to two extra focuses if you want them.' },
   { k: 'sport', t: 'Sport', h: 'Your sport and <em>experience.</em>', s: 'Pulse adds short prep drills for each sport to keep you healthy through the season.' },
-  { k: 'week', t: 'Your week', h: 'When and where <em>you train.</em>', s: 'Your plan is built around the days you can train and the equipment you can actually reach.' },
+  { k: 'week', t: 'Your week', h: 'When <em>you train.</em>', s: 'Your plan is built around the days you can actually train.' },
+  { k: 'kit', t: 'Equipment', h: 'Tap the equipment <em>you can use.</em>', s: 'Your plan is built only from what you pick. Start from a preset if it helps, then add or remove pieces.' },
   { k: 'food', t: 'Food and health', h: 'Fuel, and <em>anything to avoid.</em>', s: 'Meal ideas respect your diet and allergies. Exercises steer around injuries you mention.' }
 ];
 function showOnboarding() {
@@ -255,7 +274,7 @@ function obSide() {
     ['Goal', d.goal ? GOALS[d.goal].label : ''],
     ['Sport', d.sports.length ? d.sports.map(s => SPORTS[s].split(' (')[0]).join(', ') : ''],
     ['Week', d.sessions ? `${d.sessions} × ${d.minutes} min` : ''],
-    ['Where', { gym: 'Full gym', school: 'School gym', home: 'Home', none: 'No equipment' }[d.where]],
+    ['Where', ({ gym: 'Full gym', school: 'School gym', home: 'Home', none: 'No equipment' }[d.where]) + (d.where !== 'none' ? ` · ${plural((d.gear || []).length, 'item')}` : '')],
     ['Diet', DIET_LABEL[d.diet]]
   ];
   return `<a class="brand" href="#/"><span class="brand-mark">${IC.mark}</span>Pulse</a>
@@ -279,6 +298,12 @@ function obStepHTML() {
     <div class="grid-2">
       <div class="field"><span class="flabel">Sex <span class="hint">For energy maths</span></span>${seg('sex', [['m', 'Male'], ['f', 'Female']], d.sex, 'full')}</div>
       <div class="field"><span class="flabel">Climate <span class="hint">Sets water</span></span>${seg('climate', [['mild', 'Mild'], ['hot', 'Hot']], d.climate, 'full')}</div>
+    </div>
+    <div class="grid-2">
+      <div class="field ${UI.errors.school ? 'err' : ''}" data-field="school"><label for="f-school">School <span class="hint">${Cloud.user ? 'So your coaches can follow you' : 'Optional for guests'}</span></label>
+        <select class="input" id="f-school" data-f="school"><option value="">Not at a listed school</option>${(PULSE_CONFIG.schools || []).map(sc => `<option value="${esc(sc.id)}" ${d.school === sc.id ? 'selected' : ''}>${esc(sc.name)}</option>`).join('')}</select>${fieldErr('school')}</div>
+      <div class="field ${UI.errors.grade ? 'err' : ''}" data-field="grade"><label for="f-grade">Grade</label>
+        <select class="input" id="f-grade" data-f="grade"><option value="">Choose</option>${(PULSE_CONFIG.grades || []).map(g => `<option value="${g}" ${String(d.grade) === g ? 'selected' : ''}>Grade ${g}</option>`).join('')}</select>${fieldErr('grade')}</div>
     </div>`;
   if (k === 'goal') return `
     <div class="field ${UI.errors.goal ? 'err' : ''}" data-field="goal"><span class="flabel">Main goal</span>
@@ -299,11 +324,9 @@ function obStepHTML() {
     </div>
     <div class="field ${UI.errors.days ? 'err' : ''}" data-field="days"><span class="flabel">Training days <span class="hint">${d.days.length ? `${d.days.length} of ${n} picked` : `Leave empty and Pulse spaces ${n} days for you`}</span></span>
       <div class="days-pick" role="group" aria-label="Training days">${DAYS.map((x, i) => `<button type="button" data-act="ob-day" data-v="${i}" aria-pressed="${d.days.includes(i)}" aria-label="${DAYS_L[i]}">${x}</button>`).join('')}</div>${fieldErr('days')}</div>
-    <div class="field"><span class="flabel">Where you train</span>
-      <div class="chips">${[['gym', 'Full gym'], ['school', 'School gym'], ['home', 'Home'], ['none', 'No equipment']].map(([v, l]) => chip('where', v, l, d.where === v)).join('')}</div></div>
-    ${d.where === 'school' || d.where === 'home' ? `<div class="field"><span class="flabel">Equipment you can reach <span class="hint">${d.equip.length ? plural(d.equip.length, 'item') : 'Bodyweight only'}</span></span>
-      <div class="chips">${Object.entries(KIT).map(([v, l]) => chip('equip', v, l, d.equip.includes(v), true)).join('')}</div></div>` : ''}`;
+    `;
   }
+  if (k === 'kit') return kitStepHTML(d);
   return `
     <div class="field"><span class="flabel">Diet</span>${seg('diet', Object.entries(DIET_LABEL), d.diet, 'full')}</div>
     <div class="grid-2">
@@ -317,6 +340,26 @@ function obStepHTML() {
         [2, 'Sport', d.sports.length ? d.sports.map(s => SPORTS[s]).join(', ') : 'General athletic training'],
         [3, 'Week', `${d.sessions} × ${d.minutes} min · ${d.days.length ? d.days.map(i => DAYS[i]).join(' ') : 'auto days'}`]
       ].map(([i, k2, v]) => `<div><dt>${k2}</dt><dd>${v}</dd><button type="button" data-act="ob-goto" data-i="${i}">Edit</button></div>`).join('')}</dl></div>`;
+}
+function kitStepHTML(d) {
+  const gear = d.gear || (d.gear = []);
+  const where = `<div class="field"><span class="flabel">Where you train</span>
+      <div class="chips">${[['gym', 'Full gym'], ['school', 'School gym'], ['home', 'Home'], ['none', 'No equipment']].map(([v, l]) => chip('where', v, l, d.where === v)).join('')}</div></div>`;
+  if (d.where === 'none') return where + `<div class="kit-none">${IC.user}<div><b>Bodyweight plan</b><p>Push-ups, squats, lunges, planks and jumps. Pick a place with equipment above if you get access to some.</p></div></div>`;
+  const cats = EQUIP_CATS.filter(([c]) => UI.kitCat === 'all' || UI.kitCat === c);
+  return where + `<div class="field ${UI.errors.gear ? 'err' : ''}" data-field="gear">
+      <div class="kit-bar"><span class="flabel">Equipment <span class="hint" id="kit-count">${gear.length ? plural(gear.length, 'piece') + ' picked' : 'Nothing picked yet'}</span></span>
+        <div class="kit-acts"><button type="button" class="btn btn-quiet btn-sm" data-act="kit-preset" data-v="${d.where}">${{ gym: 'Typical full gym', school: 'Typical school gym', home: 'Typical home set-up' }[d.where]}</button><button type="button" class="btn btn-quiet btn-sm" data-act="kit-all">Select all</button><button type="button" class="btn btn-quiet btn-sm" data-act="kit-clear" ${gear.length ? '' : 'disabled'}>Clear</button></div></div>
+      <div class="chips kit-cats" role="tablist" aria-label="Equipment type">${[['all', 'All'], ...EQUIP_CATS].map(([c, l]) => `<button type="button" class="chip sm" role="tab" data-act="kit-cat" data-v="${c}" aria-selected="${UI.kitCat === c}" aria-pressed="${UI.kitCat === c}">${l}</button>`).join('')}</div>
+      ${fieldErr('gear')}
+      ${cats.map(([c, l]) => `<div class="kit-sec"><div class="label">${l}</div><div class="kit-grid">${EQUIP.filter(e => e.cat === c).map(e => `<button type="button" class="kit-tile" data-act="kit-tog" data-id="${e.id}" aria-pressed="${gear.includes(e.id)}"><span class="kit-ck">${IC.check}</span>${equipArt(e, 56)}<span class="kit-n">${esc(e.name)}</span></button>`).join('')}</div></div>`).join('')}
+    </div>`;
+}
+function kitSync() {
+  const n = (UI.draft.gear || []).length, h = $('#kit-count'); if (h) h.textContent = n ? plural(n, 'piece') + ' picked' : 'Nothing picked yet';
+  const c = $('[data-act="kit-clear"]'); if (c) c.disabled = !n;
+  if (n && UI.errors.gear) { delete UI.errors.gear; const f = $('[data-field="gear"]'); if (f) { f.classList.remove('err'); const e = f.querySelector('.error'); e && e.remove(); } }
+  saveDraft(); $('.ob-side').innerHTML = obSide();
 }
 function drawObStep(first = false) {
   const st = OB[UI.obStep], form = $('#ob-form');
@@ -341,6 +384,9 @@ function validateStep(i) {
     if (d.height === '' || isNaN(d.height)) e.height = 'Add your height.'; else if (d.height < 120 || d.height > 220) e.height = 'Use 120 to 220 cm.';
     if (d.weight === '' || isNaN(d.weight)) e.weight = 'Add your weight.'; else if (d.weight < 30 || d.weight > 150) e.weight = 'Use 30 to 150 kg.';
   }
+  if (k === 'you' && Cloud.user && !d.school) e.school = 'Pick your school so your coaches can see your progress.';
+  if (k === 'you' && Cloud.user && !d.grade) e.grade = 'Pick your grade.';
+  if (k === 'kit' && d.where !== 'none' && !(d.gear || []).length) e.gear = 'Tap at least one piece of equipment, or choose No equipment.';
   if (k === 'goal' && !d.goal) e.goal = 'Pick a main goal to continue.';
   if (k === 'week' && d.days.length && d.days.length !== +d.sessions) e.days = `Pick ${d.sessions} days, or clear them all and Pulse will choose.`;
   return e;
@@ -360,7 +406,7 @@ function obNext() {
 function finishOnboarding() {
   for (let i = 0; i < OB.length; i++) { const e = validateStep(i); if (Object.keys(e).length) { UI.obStep = i; UI.errors = e; drawObStep(); return; } }
   const d = UI.draft;
-  const profile = { name: String(d.name).trim(), age: +d.age, sex: d.sex, height: +d.height, weight: +d.weight, climate: d.climate, goal: d.goal, extra: d.extra.filter(x => x !== d.goal).slice(0, 2), sports: d.sports.slice(0, 3), exp: d.exp, sessions: +d.sessions, minutes: +d.minutes, days: d.days.slice().sort((a, b) => a - b), where: d.where, equip: d.where === 'school' || d.where === 'home' ? d.equip : [], diet: d.diet, allergies: String(d.allergies).trim(), injuries: String(d.injuries).trim() };
+  const profile = { name: String(d.name).trim(), age: +d.age, sex: d.sex, height: +d.height, weight: +d.weight, climate: d.climate, goal: d.goal, extra: d.extra.filter(x => x !== d.goal).slice(0, 2), sports: d.sports.slice(0, 3), exp: d.exp, sessions: +d.sessions, minutes: +d.minutes, days: d.days.slice().sort((a, b) => a - b), where: d.where, gear: d.where === 'none' ? [] : (d.gear || []).slice(), equip: [], school: d.school || '', grade: d.grade || '', diet: d.diet, allergies: String(d.allergies).trim(), injuries: String(d.injuries).trim() };
   const rebuilding = UI.rebuilding && REAL && REAL.profile;
   if (rebuilding) {
     profile.createdAt = REAL.profile.createdAt;
@@ -370,7 +416,9 @@ function finishOnboarding() {
     profile.createdAt = Date.now();
     S = freshState(profile);
   }
+  if (rebuilding) { profile.kcalAdj = REAL.profile.kcalAdj || 0; profile.rpeAdj = REAL.profile.rpeAdj || 0; }
   save(); store.del(LS_DRAFT);
+  if (Cloud.user) Cloud.updateProfile({ school: profile.school, grade: profile.grade, sports: profile.sports, name: profile.name }).catch(() => {});
   UI.draft = null; UI.rebuilding = false; UI.planWeek = UI.planDay = null;
   showBuilding(rebuilding);
 }
@@ -378,7 +426,7 @@ function showBuilding(rebuilding) {
   const p = S.profile, kit = kitOf(p);
   const nEx = EX.filter(e => e.eq.some(alt => alt.every(k => kit.includes(k)))).length;
   const steps = [
-    `Matching ${nEx} exercises to your equipment`,
+    p.where === 'none' ? `Matching ${nEx} bodyweight exercises` : `Matching ${nEx} exercises to your ${plural((p.gear || []).length, 'piece')} of equipment`,
     `Laying out ${p.sessions} sessions across your week`,
     'Setting Base, Build, Peak and Deload targets',
     `Working out fuel for ${DIET_LABEL[p.diet].toLowerCase()} eating`
@@ -416,7 +464,7 @@ function showApp(view) {
           <button class="side-search" data-act="cmdk" type="button">${IC.search}<span>Search or jump</span><span class="kbd">${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} K</span></button>
           <nav class="side-nav">${APP_VIEWS.map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${VIEW_META[v].t}</span><span class="badge"></span></a>`).join('')}</nav>
           <div class="side-block" id="side-block"></div>
-          <div class="side-foot"><span class="save-state">${S.sample ? '<span class="dot" style="background:var(--warn)"></span>Sample, not saved' : '<span class="dot"></span>Saved on this device'}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
+          <div class="side-foot"><span class="save-state">${S.sample ? '<span class="dot" style="background:var(--warn)"></span>Sample, not saved' : Cloud.user ? `<span class="dot"></span>${Cloud.mode === 'firebase' ? 'Synced to your account' : 'Signed in (demo mode)'}` : '<span class="dot" style="background:var(--ink-4)"></span>Guest · saved on this device'}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
         </aside>
         <div class="main">
           <header class="topbar" id="topbar">
@@ -431,7 +479,7 @@ function showApp(view) {
           <main class="content" id="main" tabindex="-1"></main>
         </div>
       </div>
-      <nav class="tabbar" aria-label="Main">${['today', 'plan', 'session', 'fuel', 'progress'].map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${VIEW_META[v].t}</span></a>`).join('')}</nav>
+      <nav class="tabbar" aria-label="Main">${['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach'].map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${v === 'ask' ? 'Ask' : VIEW_META[v].t}</span></a>`).join('')}</nav>
     </div>`);
     const tb = $('#topbar');
     const onScroll = () => tb && tb.classList.toggle('scrolled', scrollY > 4);
@@ -480,11 +528,12 @@ VIEWS.today = () => {
   return `<div class="ph"><div><div class="label">${DAYS_L[wd(d)]} · ${fmtDate(d)}</div><h2 style="margin-top:8px">${greet()}, <em>${esc(p.name)}.</em></h2><p>${line}</p></div>
     <div class="ph-actions"><span class="pill line">Week ${i + 1} · ${ph.n}</span></div></div>
     <div class="dash stagger">
+      ${weighInCard()}${adjustCard()}
       <section class="card card-pad c-7" aria-labelledby="t-sess">${todaySessionCard(sess, done)}</section>
-      <section class="card c-5" aria-labelledby="t-ready">${readinessCard()}</section>
-      <section class="card c-4">${fuelMiniCard()}</section>
-      <section class="card c-4">${waterCard()}</section>
-      <section class="card c-4">${weekCard()}</section>
+      <section class="card water-card c-5">${waterCard()}</section>
+      <section class="card c-6" aria-labelledby="t-ready">${readinessCard()}</section>
+      <section class="card c-6">${fuelMiniCard()}</section>
+      <section class="card c-12">${weekCard()}</section>
     </div>`;
 };
 function todaySessionCard(sess, done) {
@@ -549,14 +598,6 @@ function fuelMiniCard() {
       ${ring(e.kcal, t.kcal, 84, 8, 'var(--ink)', `<span class="big" style="font-size:15px">${Math.round(clamp(e.kcal / t.kcal, 0, 9.99) * 100)}%</span>`, `${fmtN(e.kcal)} of ${fmtN(t.kcal)} kcal`)}
       <div><div class="kcal-big" style="font-size:30px"><span data-count="${Math.round(e.kcal)}">0</span></div><div class="muted" style="font-size:13px">of ${fmtN(t.kcal)} kcal · ${left >= 0 ? fmtN(left) + ' left' : fmtN(-left) + ' over'}</div></div></div>
       <div class="macros">${[['Protein', e.p, t.protein, 'acc'], ['Carbs', e.c, t.carbs, ''], ['Fat', e.f, t.fat, '']].map(([n, v, m, cl]) => `<div class="macro"><div class="top"><b>${n}</b><span><strong>${fmtN(v)}</strong> / ${m} g</span></div>${bar(v, m, cl)}</div>`).join('')}</div></div>`;
-}
-function waterCard() {
-  const ds = UI.view === 'fuel' && UI.fuelDate ? UI.fuelDate : today();
-  const t = targets(S.profile, !!sessionFor(parseIso(ds))), goal = Math.round(t.water / 250), n = S.log.water[ds] || 0;
-  return `<div class="card-h"><h3>Water</h3><div style="display:flex;gap:2px"><button class="icon-btn sm" data-act="water" data-v="-1" aria-label="Remove a glass" ${n ? '' : 'disabled'}>${IC.minus}</button><button class="icon-btn sm" data-act="water" data-v="1" aria-label="Add a glass">${IC.plus}</button></div></div>
-    <div class="card-b"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:14px"><span class="kcal-big" style="font-size:30px">${litres(n)}<small> L</small></span><span class="muted" style="font-size:13px">of ${litres(goal)} L · ${n} of ${goal} glasses</span></div>
-      <div class="water" role="group" aria-label="Glasses of water, 250 ml each" style="grid-template-columns:repeat(${(c => c <= 10 ? c : Math.ceil(c / 2))(Math.max(goal, n))}, minmax(0, 46px))">${Array.from({ length: Math.max(goal, n) }, (_, i) => `<button class="glass ${i < n ? 'full' : ''}" data-act="glass" data-i="${i}" aria-label="Glass ${i + 1}${i < n ? ', drunk' : ''}" aria-pressed="${i < n}"></button>`).join('')}</div>
-      <p class="muted" style="font-size:12.5px;margin-top:12px">${n >= goal ? 'Target hit. Keep sipping through training.' : `Tap a glass to log it. ${S.profile.climate === 'hot' ? 'Includes extra for hot weather.' : ''}`}</p></div>`;
 }
 function weekStrip(mon, opts = {}) {
   const days = trainingDays(S.profile), ds0 = today();
@@ -780,6 +821,7 @@ function doneScreen({ entry, pbs }) {
       <div><span class="label">This week</span><b>${wk}<small>/ ${planned}</small></b><span class="delta ${wk >= planned ? 'up' : ''}">${wk >= planned ? 'Week complete' : plural(planned - wk, 'session') + ' to go'}</span></div>
     </div>
     ${pbs.length ? `<div class="card" style="margin-top:14px;background:var(--surface-2)"><div class="card-h"><h3>New personal bests</h3><span class="pill acc">${pbs.length}</span></div><div class="card-b"><ul class="pb-list">${pbs.map(p => `<li><div><div class="nm">${esc(p.n)}</div><div class="dt">${p.prev ? `Up from ${fmt1(p.prev)} kg` : 'First logged weight'}</div></div><b>${fmt1(p.v)} kg</b></li>`).join('')}</ul></div></div>` : ''}
+    <div class="acwr" style="margin-top:14px;background:color-mix(in srgb, #3B82C4 10%, transparent)"><span style="color:#3B82C4">${IC.drop.replace('<svg', '<svg width="22" height="22"')}</span><p><b>Drink ${entry.mins > 50 ? '500–750' : '400–500'} ml in the next hour.</b> You lost water through sweat, and even mild dehydration slows recovery. <button class="link-tip" data-act="drink" data-ml="500">Log 500 ml now</button></p></div>
     <div class="acwr" style="margin-top:14px">${IC.fuel.replace('<svg', '<svg width="22" height="22"')}<p><b>Refuel in the next two hours.</b> Aim for ${Math.round(S.profile.weight * 0.3)}–${Math.round(S.profile.weight * 0.4)} g of protein plus carbs, like ${S.profile.diet === 'vegan' ? 'dal, rice and a pea shake' : S.profile.diet === 'veg' ? 'paneer with roti, or curd and a banana' : 'chicken, rice and fruit'}.</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><a class="btn btn-primary" href="#/today">Back to today</a><a class="btn btn-ghost" href="#/progress">See progress</a><a class="btn btn-quiet" href="#/fuel">Log food</a></div></div></div>`;
 }
@@ -787,37 +829,6 @@ function doneScreen({ entry, pbs }) {
 /* =========================================================
    VIEW: FUEL
    ========================================================= */
-VIEWS.fuel = () => {
-  const p = S.profile;
-  if (!UI.fuelDate) UI.fuelDate = today();
-  const ds = UI.fuelDate, d = parseIso(ds), training = !!sessionFor(d), t = targets(p, training);
-  const items = S.log.food[ds] || [], e = sumFoods(items), left = t.kcal - e.kcal;
-  const label = ds === today() ? 'Today' : ds === iso(addDays(new Date(), -1)) ? 'Yesterday' : `${DAYS[wd(d)]} ${fmtDate(d)}`;
-  const ideas = mealIdeas(p, ds, UI.mealShift);
-  return `<div class="ph"><div><div class="label">${training ? 'Training day targets' : 'Rest day targets'} · ${DIET_LABEL[p.diet]}</div><h2 style="margin-top:8px">Fuel <em>by the gram.</em></h2></div>
-    <div class="ph-actions"><div class="daynav"><button class="icon-btn" data-act="fuel-day" data-v="-1" aria-label="Previous day" ${ds <= iso(addDays(new Date(), -30)) ? 'disabled' : ''}>${IC.chevL}</button><span aria-live="polite">${label}</span><button class="icon-btn" data-act="fuel-day" data-v="1" aria-label="Next day" ${ds >= today() ? 'disabled' : ''}>${IC.chevR}</button></div></div></div>
-    <div class="dash stagger">
-      <section class="card card-pad c-12"><div class="fuel-top">
-        ${ring(e.kcal, t.kcal, 148, 12, left < -150 ? 'var(--signal)' : 'var(--ink)', `<span class="big" style="font-size:30px" data-count="${Math.round(e.kcal)}">0</span><span class="sm">of ${fmtN(t.kcal)} kcal</span>`, `${fmtN(e.kcal)} of ${fmtN(t.kcal)} calories`)}
-        <div><div style="display:flex;flex-wrap:wrap;gap:6px 22px;align-items:baseline;margin-bottom:18px"><div class="kcal-big">${left >= 0 ? fmtN(left) : '+' + fmtN(-left)}<small> kcal ${left >= 0 ? 'left' : 'over'}</small></div>
-          <span class="muted" style="font-size:13px">${training ? 'Includes extra carbs for today’s session.' : 'Slightly lower on a rest day.'} <button type="button" class="link-tip" data-act="how-kcal">How is this worked out?</button></span></div>
-          <div class="macros" style="grid-template-columns:repeat(3,minmax(0,1fr));display:grid;gap:18px">${[['Protein', e.p, t.protein, 'acc'], ['Carbs', e.c, t.carbs, ''], ['Fat', e.f, t.fat, '']].map(([n, v, m, cl]) => `<div class="macro"><div class="top"><b>${n}</b><span><strong>${fmtN(v)}</strong>/${m} g</span></div>${bar(v, m, cl)}</div>`).join('')}</div></div></div></section>
-      <section class="card c-7"><div class="card-h"><h3>Logged ${ds === today() ? 'today' : label.toLowerCase()}</h3><span class="label">${plural(items.length, 'item')}</span></div>
-        <div class="card-b">${items.length ? `<div>${['Breakfast', 'Lunch', 'Snack', 'Dinner', 'Other'].map(m => { const its = items.map((it, i) => ({ it, i })).filter(x => (x.it.meal || 'Other') === m); return its.length ? `<div class="label" style="margin:14px 0 2px">${m}</div>` + its.map(({ it, i }) => { const f = itemInfo(it); if (!f) return ''; const s = it.s || 1; return `<div class="log-item"><div style="min-width:0"><div class="nm">${esc(f.name)}</div><div class="mac">${fmtN(f.kcal * s)} kcal · P ${fmt1(f.p * s)} · C ${fmt1(f.c * s)} · F ${fmt1(f.f * s)}</div></div>
-          <div class="stepper"><button data-act="serv" data-i="${i}" data-v="-0.5" aria-label="Less of ${esc(f.name)}">${IC.minus}</button><span>×${fmt1(s)}</span><button data-act="serv" data-i="${i}" data-v="0.5" aria-label="More of ${esc(f.name)}">${IC.plus}</button></div>
-          <button class="icon-btn sm" data-act="food-del" data-i="${i}" aria-label="Remove ${esc(f.name)}">${IC.x}</button></div>`; }).join('') : ''; }).join('')}</div>`
-          : `<div class="empty" style="padding:28px 8px"><div class="glyph">${IC.fuel}</div><h4>Nothing logged ${ds === today() ? 'yet' : 'for this day'}</h4><p>Add a meal idea below in one tap, or search for a food.</p></div>`}</div></section>
-      <section class="card c-5">${waterCard()}</section>
-      <section class="card c-7"><div class="card-h"><h3>Meal ideas</h3><button class="btn btn-quiet btn-sm" data-act="shuffle">${IC.shuffle}Shuffle</button></div>
-        <div class="card-b" style="padding-top:6px">${Object.entries(ideas).map(([m, combo]) => {
-          if (!combo.length) return `<div class="meal"><span class="label">${m}</span><span class="muted" style="font-size:13.5px">No ideas fit your diet and allergies. Search below.</span><span></span></div>`;
-          const tag = m + ':' + combo.join('+'), added = items.some(it => it.idea === tag), tt = sumFoods(combo.map(id => ({ id, s: 1 })));
-          return `<div class="meal ${added ? 'added' : ''}"><span class="label">${m}</span><div style="min-width:0"><div class="what">${combo.map(id => esc(FOODS[id][0])).join(' + ')}</div><div class="mac">${fmtN(tt.kcal)} kcal · ${fmtN(tt.p)} g protein</div></div>
-            ${added ? `<span class="pill good">${IC.check.replace('<svg', '<svg width="12" height="12"')} Added</span>` : `<button class="btn btn-ghost btn-sm" data-act="meal-add" data-m="${m}" data-tag="${esc(tag)}">${IC.plus}Add</button>`}</div>`;
-        }).join('')}</div></section>
-      <section class="card c-5" id="food-search">${foodSearchCard()}</section>
-    </div>`;
-};
 function foodResults() {
   const p = S.profile, q = UI.foodQ.trim().toLowerCase();
   let r = Object.entries(FOODS).filter(([id, f]) => (!q || f[0].toLowerCase().includes(q) || id.includes(q)) && (!UI.dietOnly || foodOk(id, p)));
@@ -825,16 +836,6 @@ function foodResults() {
   if (F) r = r.filter(([, f]) => F(f));
   const sorts = { match: ([a, f], [b, g]) => (q ? (g[0].toLowerCase().startsWith(q) - f[0].toLowerCase().startsWith(q)) : 0) || f[0].localeCompare(g[0]), protein: (a, b) => b[1][3] - a[1][3], kcal: (a, b) => a[1][2] - b[1][2], az: (a, b) => a[1][0].localeCompare(b[1][0]) };
   return r.sort(sorts[UI.foodSort]);
-}
-function foodSearchCard() {
-  const r = foodResults(), p = S.profile;
-  return `<div class="card-h"><h3>Add food</h3><button class="btn btn-quiet btn-sm" data-act="custom-food">${IC.plus}Custom</button></div>
-    <div class="card-b"><div class="input-wrap has-ic">${IC.search.replace('<svg', '<svg class="prefix-ic"')}<input class="input" type="search" id="food-q" placeholder="Search ${Object.keys(FOODS).length} foods" value="${esc(UI.foodQ)}" aria-label="Search foods" autocomplete="off"></div>
-      <div class="toolbar">${[['all', 'All'], ['protein', 'High protein'], ['carbs', 'Carbs'], ['light', 'Light']].map(([v, l]) => `<button class="chip" data-act="food-filter" data-v="${v}" aria-pressed="${UI.foodFilter === v}">${l}</button>`).join('')}
-        <select class="input" id="food-sort" aria-label="Sort foods">${[['match', 'Best match'], ['protein', 'Most protein'], ['kcal', 'Fewest kcal'], ['az', 'A to Z']].map(([v, l]) => `<option value="${v}" ${UI.foodSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-2);margin:10px 0 8px;cursor:pointer"><button type="button" class="switch" role="switch" aria-checked="${UI.dietOnly}" data-act="diet-only" aria-label="Only show foods that fit my diet"></button>Only foods that fit my diet</label>
-      <div class="food-res" id="food-res">${r.length ? r.map(([id, f]) => { const why = foodWhyNot(id, p); return `<button class="food-row" data-act="food-add" data-id="${id}"><div style="min-width:0"><div class="nm">${esc(f[0])} ${why ? `<span class="pill warn" style="height:20px">${esc(why)}</span>` : ''}</div><div class="mac">${esc(f[1])} · ${foodMac(f)}</div></div><span class="add" aria-hidden="true">${IC.plus}</span></button>`; }).join('')
-        : `<div class="empty" style="padding:24px 8px"><h4 style="font-size:15px">No foods match</h4><p style="font-size:13.5px">${UI.dietOnly ? 'Try turning off the diet filter, or ' : ''}add it as a custom food.</p><div class="acts"><button class="btn btn-ghost btn-sm" data-act="custom-food">${IC.plus}Add “${esc(UI.foodQ || 'custom food')}”</button></div></div>`}</div></div>`;
 }
 function addFood(id, opts = {}) {
   const ds = UI.fuelDate || today();
@@ -893,12 +894,14 @@ VIEWS.profile = () => {
   return `<div class="ph"><div class="prof-head"><span class="avatar">${esc(initials(p.name))}</span><div><h2>${esc(p.name)}</h2><p style="margin-top:2px">${p.age} · ${GOALS[p.goal].label}${p.sports.length ? ' · ' + p.sports.map(s => SPORTS[s].split(' (')[0]).join(', ') : ''}</p></div></div>
     <div class="ph-actions"><a class="btn btn-primary" href="#/start">${IC.edit}Edit plan inputs</a></div></div>
     <div class="dash">
+      <section class="card c-12">${accountCard()}</section>
       <section class="card c-7"><div class="card-h"><h3>Your inputs</h3><span class="label">Change any of these in Edit plan inputs</span></div>
         <div class="card-b"><dl class="review" style="border:0;background:none">${[
           ['Body', `${p.height} cm · ${p.weight} kg · ${p.sex === 'f' ? 'female' : 'male'}`],
           ['Goal', GOALS[p.goal].label + (p.extra.length ? ' + ' + p.extra.map(x => GOALS[x].label.toLowerCase()).join(', ') : '')],
           ['Week', `${p.sessions} × ${p.minutes} min · ${trainingDays(p).map(i => DAYS[i]).join(' ')}`],
-          ['Where', where + (p.equip.length ? ` · ${plural(p.equip.length, 'item')}` : '')],
+          ['School', p.school ? Cloud.schoolName(p.school) + (p.grade ? ` · grade ${p.grade}` : '') : 'Not set'],
+          ['Where', where + (p.where !== 'none' ? ` · ${plural((p.gear || []).length || (p.equip || []).length, 'piece')} of equipment` : '')],
           ['Level', { beg: 'New to lifting', int: 'Some experience', adv: 'Experienced' }[p.exp]],
           ['Diet', DIET_LABEL[p.diet] + (p.allergies ? ` · avoids ${p.allergies}` : '')],
           ['Injuries', p.injuries || 'None noted']
@@ -908,15 +911,16 @@ VIEWS.profile = () => {
       <section class="card c-6"><div class="card-h"><h3>Preferences</h3></div>
         <div class="card-b settings">
           <div class="set-row"><div><b>Appearance</b><span>Follow your device, or pick one</span></div><div class="seg sm" role="radiogroup" aria-label="Theme">${[['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) => `<button type="button" role="radio" data-act="theme-set" data-v="${v}" aria-checked="${tp === v}">${l}</button>`).join('')}</div></div>
+          <div class="set-row"><div><b>Water reminders</b><span>${PREFS.remind ? `Every ${PREFS.remind} minutes, 7 am to 9 pm` : 'Off'}</span></div><button class="btn btn-ghost btn-sm" data-act="water-remind">${IC.bell}Change</button></div>
           <div class="set-row"><div><b>Rest timer sound</b><span>A soft chime when rest is over</span></div><button class="switch" role="switch" aria-checked="${PREFS.sound}" data-act="pref-sound" aria-label="Rest timer sound"></button></div>
           <div class="set-row"><div><b>Exercise swaps</b><span>${Object.keys(S.swaps || {}).length ? plural(Object.keys(S.swaps).length, 'swap') + ' in your plan' : 'No swaps made'}</span></div><button class="btn btn-ghost btn-sm" data-act="reset-swaps" ${Object.keys(S.swaps || {}).length ? '' : 'disabled'}>Reset swaps</button></div>
           <div class="set-row"><div><b>Restart the block</b><span>Begin again at Base week from this Monday</span></div><button class="btn btn-ghost btn-sm" data-act="restart-block">Restart</button></div>
         </div></section>
-      <section class="card c-6"><div class="card-h"><h3>Your data</h3><span class="label">${S.sample ? 'Sample only' : 'Stored on this device'}</span></div>
+      <section class="card c-6"><div class="card-h"><h3>Your data</h3><span class="label">${S.sample ? 'Sample only' : Cloud.user ? 'Saved to your account' : 'Stored on this device'}</span></div>
         <div class="card-b settings">
           <div class="set-row"><div><b>Export</b><span>Download everything as a JSON file</span></div><button class="btn btn-ghost btn-sm" data-act="export">${IC.download}Export</button></div>
           <div class="set-row"><div><b>Import</b><span>Restore from a Pulse export</span></div><label class="btn btn-ghost btn-sm" tabindex="0">${IC.upload}Import<input type="file" accept="application/json,.json" id="import-file" hidden></label></div>
-          <div class="set-row"><div><b>Delete all data</b><span>Removes your plan and logs from this browser</span></div><button class="btn btn-ghost btn-sm" data-act="wipe" style="color:var(--bad)">${IC.trash}Delete</button></div>
+          <div class="set-row"><div><b>Delete all data</b><span>Removes your plan and logs${Cloud.user ? ' from your account' : ' from this browser'}</span></div><button class="btn btn-ghost btn-sm" data-act="wipe" style="color:var(--bad)">${IC.trash}Delete</button></div>
         </div></section>
       <p class="muted c-12" style="font-size:12.5px;max-width:60em">Pulse gives general training and nutrition guidance, not medical advice. If you are under 18, train with supervision where you can, and check with a coach, parent or doctor before starting a new programme, especially if you have an injury or a health condition.</p>
     </div>`;
@@ -956,6 +960,11 @@ const ACT = {
     const f = el.closest('.field'); f.classList.remove('err'); const er = f.querySelector('.error'); er && er.remove();
     f.querySelector('.hint').textContent = d.length ? `${d.length} of ${n} picked` : `Leave empty and Pulse spaces ${n} days for you`;
   },
+  'kit-tog': el => { const g = UI.draft.gear || (UI.draft.gear = []), id = el.dataset.id, i = g.indexOf(id); if (i >= 0) g.splice(i, 1); else g.push(id); el.setAttribute('aria-pressed', i < 0); if (i < 0) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); } kitSync(); },
+  'kit-all': () => { UI.draft.gear = EQUIP.map(e => e.id); $$('.kit-tile').forEach(b => b.setAttribute('aria-pressed', 'true')); kitSync(); },
+  'kit-clear': () => { UI.draft.gear = []; $$('.kit-tile').forEach(b => b.setAttribute('aria-pressed', 'false')); kitSync(); },
+  'kit-preset': el => { UI.draft.gear = (GYM_PRESETS[el.dataset.v] || []).slice(); $$('.kit-tile').forEach(b => b.setAttribute('aria-pressed', UI.draft.gear.includes(b.dataset.id))); kitSync(); toast(`Preset applied. Tap any piece to add or remove it.`); },
+  'kit-cat': el => { UI.kitCat = el.dataset.v; const y = scrollY; drawObStep(); window.scrollTo(0, y); },
   'ob-next': () => obNext(),
   'ob-back': () => { if (UI.obStep > 0) { UI.obStep--; UI.errors = {}; saveDraft(); drawObStep(); } },
   'ob-goto': el => { const i = +el.dataset.i; if (i <= UI.obStep) { UI.obStep = i; UI.errors = {}; drawObStep(); } },
@@ -967,8 +976,6 @@ const ACT = {
   'ci-save': () => { S.log.check[today()] = { ...UI.ci }; UI.editCheck = false; UI.ci = null; save(); refresh(); const b = readyBand(readiness(S.log.check[today()])); toast(`<b>Checked in.</b> ${b.t}.`); checkMilestones(); },
   'ci-edit': () => { UI.editCheck = true; UI.ci = { ...S.log.check[today()] }; refresh(); },
   'ci-cancel': () => { UI.editCheck = false; UI.ci = null; refresh(); },
-  water: el => setWater((S.log.water[waterDate()] || 0) + +el.dataset.v),
-  glass: el => { const i = +el.dataset.i, n = S.log.water[waterDate()] || 0; setWater(i + 1 === n ? i : i + 1); },
 
   /* plan */
   'plan-week': el => { UI.planWeek = +el.dataset.i; refresh(); },
@@ -991,15 +998,6 @@ const ACT = {
 
   /* fuel */
   'fuel-day': el => { const d = addDays(parseIso(UI.fuelDate), +el.dataset.v); if (iso(d) > today()) return; UI.fuelDate = iso(d); refresh(); },
-  shuffle: () => { UI.mealShift++; refresh(); },
-  'meal-add': el => {
-    const m = el.dataset.m, tag = el.dataset.tag, ids = tag.split(':')[1].split('+');
-    const ds = UI.fuelDate; const arr = S.log.food[ds] || (S.log.food[ds] = []);
-    ids.forEach(id => arr.push({ id, s: 1, meal: m, idea: tag }));
-    save(); refresh();
-    toast(`<b>${m} logged.</b> ${ids.map(id => FOODS[id][0]).join(', ')}`, { action: { label: 'Undo', fn: () => { S.log.food[ds] = (S.log.food[ds] || []).filter(it => it.idea !== tag); save(); refresh(); } } });
-    checkMilestones();
-  },
   'food-add': el => {
     const id = el.dataset.id; addFood(id);
     const f = FOODS[id];
@@ -1035,43 +1033,14 @@ const ACT = {
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     toast('Export downloaded.', { icon: IC.download });
   },
-  wipe: () => confirmModal({ title: 'Delete all your Pulse data?', sub: 'Your plan, sessions, food logs and check-ins will be removed from this browser. Export first if you want a copy. This cannot be undone.', confirm: 'Delete everything', danger: true, onConfirm: () => { if (S.sample) { S = REAL; navigate(''); return; } store.del(LS); store.del(LS_DRAFT); REAL = S = null; UI.draft = null; navigate(''); setTimeout(() => toast('All data deleted from this browser.'), 300); } })
+  wipe: () => confirmModal({ title: 'Delete all your Pulse data?', sub: 'Your plan, sessions, food logs and check-ins will be removed from this browser. Export first if you want a copy. This cannot be undone.', confirm: 'Delete everything', danger: true, onConfirm: () => { if (S.sample) { S = REAL; navigate(''); return; } store.del(stateKey()); store.del(LS_DRAFT); if (Cloud.user) { Cloud.saveState(null).catch(() => {}); Cloud.publishProgress([]).catch(() => {}); } REAL = S = null; UI.draft = null; navigate(Cloud.user ? 'start' : ''); setTimeout(() => toast(Cloud.user ? 'All plan data deleted. Your account is still here.' : 'All data deleted from this browser.'), 300); } })
 };
-function waterDate() { return UI.view === 'fuel' && UI.fuelDate ? UI.fuelDate : today(); }
-function setWater(n) {
-  const ds = waterDate(); S.log.water[ds] = clamp(n, 0, 24); save();
-  const y = scrollY; refresh(); window.scrollTo(0, y);
-  const goal = Math.round(targets(S.profile, !!sessionFor(parseIso(ds))).water / 250);
-  if (S.log.water[ds] === goal) toast('<b>Water target hit.</b> Nicely done.', { icon: IC.drop });
-  checkMilestones();
-}
 function redrawFoodSearch() {
   const box = $('#food-search'); if (!box) return;
   const had = document.activeElement && document.activeElement.id === 'food-q', pos = had ? document.activeElement.selectionStart : 0;
   box.innerHTML = foodSearchCard();
   if (had) { const i = $('#food-q'); i.focus(); try { i.setSelectionRange(pos, pos); } catch (e) {} }
 }
-function customFoodModal() {
-  const nf = (k, l, s, ph) => `<div class="field" data-field="${k}"><label for="cf-${k}">${l}</label><div class="input-wrap"><input class="input num" id="cf-${k}" type="number" inputmode="decimal" min="0" step="1" placeholder="${ph}"><span class="suffix">${s}</span></div></div>`;
-  openModal({
-    title: 'Add a custom food', sub: 'For anything not in the list. Check the label or a rough guess is fine.',
-    body: `<div style="display:grid;gap:16px"><div class="field" data-field="name"><label for="cf-name">Name</label><input class="input" id="cf-name" type="text" maxlength="40" placeholder="e.g. Mum’s aloo paratha" value="${esc(UI.foodQ)}" autofocus></div>
-      <div class="grid-2">${nf('kcal', 'Calories', 'kcal', '300')}${nf('p', 'Protein', 'g', '10')}${nf('c', 'Carbs', 'g', '40')}${nf('f', 'Fat', 'g', '10')}</div></div>`,
-    actions: [{ label: 'Cancel' }, { label: 'Add food', kind: 'btn-primary', fn: (api) => {
-      const m = api.el, g = k => m.querySelector('#cf-' + k).value.trim();
-      $$('.field', m).forEach(f => { f.classList.remove('err'); const e = f.querySelector('.error'); e && e.remove(); });
-      const errs = {};
-      if (!g('name')) errs.name = 'Give it a name.';
-      if (g('kcal') === '' || +g('kcal') < 0 || +g('kcal') > 3000) errs.kcal = 'Enter 0 to 3000.';
-      ['p', 'c', 'f'].forEach(k => { if (g(k) !== '' && (+g(k) < 0 || +g(k) > 300)) errs[k] = '0 to 300 g.'; });
-      if (Object.keys(errs).length) { Object.entries(errs).forEach(([k, msg]) => { const f = m.querySelector(`[data-field="${k}"]`); f.classList.add('err'); f.insertAdjacentHTML('beforeend', `<span class="error">${IC.alert}${msg}</span>`); }); m.querySelector('.field.err input').focus(); return false; }
-      const ds = UI.fuelDate || today(), arr = S.log.food[ds] || (S.log.food[ds] = []);
-      arr.push({ custom: { name: g('name'), kcal: +g('kcal'), p: +g('p') || 0, c: +g('c') || 0, f: +g('f') || 0 }, s: 1, meal: ds === today() ? mealNow() : 'Other' });
-      save(); UI.foodQ = ''; refresh(); toast(`Added <b>${esc(g('name'))}</b>.`);
-    } }]
-  });
-}
-
 /* ---------- global listeners ---------- */
 document.addEventListener('click', e => {
   if (e.target.closest('.skip')) { e.preventDefault(); const m = $('#main'); if (m) { m.setAttribute('tabindex', '-1'); m.focus(); } return; }
@@ -1104,9 +1073,7 @@ document.addEventListener('submit', e => {
     e.preventDefault();
     const inp = $('#w-in'), err = $('#w-err'), v = +inp.value;
     if (!inp.value || v < 30 || v > 200) { err.hidden = false; err.innerHTML = `${IC.alert}Enter a weight between 30 and 200 kg.`; f.classList.add('err'); inp.focus(); return; }
-    upsertWeight(today(), round(v, 1)); S.profile.weight = round(v, 1); save();
-    const y = scrollY; refresh(); window.scrollTo(0, y);
-    toast(`<b>${fmt1(v)} kg logged.</b> Food targets updated to match.`, { icon: IC.scale });
+    logWeighIn(round(v, 1));
   }
 });
 document.addEventListener('keydown', e => {
@@ -1124,7 +1091,7 @@ function importFile(file) {
       const d = JSON.parse(rd.result);
       if (!d || !d.profile || !d.log || !Array.isArray(d.log.sessions)) throw new Error('shape');
       confirmModal({ title: 'Replace your data with this file?', sub: `${esc(d.profile.name || 'Athlete')} · ${plural(d.log.sessions.length, 'session')}. Your current plan and logs on this device will be overwritten.`, confirm: 'Import', onConfirm: () => {
-        delete d.sample; d.log.food = d.log.food || {}; d.log.water = d.log.water || {}; d.log.check = d.log.check || {}; d.log.weight = d.log.weight || []; d.swaps = d.swaps || {};
+        delete d.sample; migrateState(d);
         S = d; save(); UI.planWeek = UI.planDay = null; UI.screen = null; navigate('today'); setTimeout(() => toast('<b>Import complete.</b> Welcome back.'), 300);
       } });
     } catch (err) { toast('That file is not a Pulse export. Nothing was changed.', { type: 'err' }); }
@@ -1142,7 +1109,9 @@ function commands(q) {
     const sess = sessionFor(new Date());
     if (S.active) list.push({ group: 'Actions', label: 'Resume session', icon: IC.play, run: () => navigate('session') });
     else if (sess && !loggedOn(today()).length) list.push({ group: 'Actions', label: `Start today’s session: ${esc(sess.name)}`, icon: IC.play, k: 'train workout', run: () => startSession() });
-    list.push({ group: 'Actions', label: 'Log a glass of water', icon: IC.drop, k: 'drink hydrate', run: () => { UI.fuelDate = UI.fuelDate || today(); S.log.water[today()] = (S.log.water[today()] || 0) + 1; save(); refresh(); toast(`Glass logged · ${S.log.water[today()]} today`, { icon: IC.drop }); checkMilestones(); } });
+    list.push({ group: 'Actions', label: 'Log a glass of water', icon: IC.drop, k: 'drink hydrate', run: () => addDrink(250) });
+    list.push({ group: 'Actions', label: 'Ask Pulse a question', icon: IC.chat, k: 'chat coach bot help', run: () => navigate('ask') });
+    list.push({ group: 'Actions', label: 'Add your glass', icon: IC.glass, k: 'water cup bottle photo', run: () => glassModal() });
     list.push({ group: 'Actions', label: 'Morning check-in', icon: IC.bed, k: 'readiness sleep', run: () => { UI.editCheck = !!S.log.check[today()]; UI.ci = null; navigate('today'); } });
     list.push({ group: 'Actions', label: 'Add a custom food', icon: IC.plus, k: 'meal', run: () => { UI.fuelDate = today(); navigate('fuel'); setTimeout(customFoodModal, 350); } });
     list.push({ group: 'Actions', label: 'Edit plan inputs', icon: IC.edit, k: 'rebuild settings', run: () => navigate('start') });
@@ -1162,17 +1131,24 @@ function commands(q) {
 }
 
 /* ---------- boot ---------- */
-function boot() {
+async function boot() {
   loadPrefs();
-  REAL = store.get(LS);
+  $('#root').innerHTML = '<div class="boot"><span class="brand-mark">' + IC.mark + '</span></div>';
+  await Cloud.init();
+  if (Cloud.user && Cloud.user.role === 'student') {
+    let cloud = null; try { cloud = await Cloud.loadState(); } catch (e) {}
+    const local = store.get(stateKey());
+    REAL = [cloud, local].filter(x => x && x.profile && x.log).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
+  } else if (!Cloud.user) REAL = store.get(LS);
   if (REAL && (!REAL.profile || !REAL.log)) REAL = null;
-  if (REAL) {
-    REAL.log.food = REAL.log.food || {}; REAL.log.water = REAL.log.water || {}; REAL.log.check = REAL.log.check || {}; REAL.swaps = REAL.swaps || {};
-  }
+  if (REAL) migrateState(REAL);
   S = sampleFlag() ? sampleState() : REAL;
+  if (Cloud.user && REAL) { Sync.schedule(); Sync.pullReviews(); }
+  Reminders.start();
+  if (Cloud.offline) setTimeout(() => toast('Could not reach the Pulse servers. You can still use Pulse as a guest.', { type: 'err', ms: 8000 }), 600);
   addEventListener('hashchange', route);
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { $$('[data-theme-ic]').forEach(b => b.innerHTML = isDark() ? IC.sun : IC.moon); });
-  addEventListener('storage', e => { if (e.key === LS && !(S && S.sample)) { REAL = store.get(LS); S = REAL; if (UI.screen === 'app') { if (!S) navigate(''); else refresh(); } } });
+  addEventListener('storage', e => { if (e.key === stateKey() && !(S && S.sample)) { REAL = store.get(stateKey()); if (REAL) migrateState(REAL); S = REAL; if (UI.screen === 'app') { if (!S) navigate(''); else refresh(); } } });
   addEventListener('pointerdown', primeAudio, { once: true });
   route();
 }

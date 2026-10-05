@@ -1,0 +1,55 @@
+rules_version = '2';
+// Pulse security rules. Paste into Firebase console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function meDoc() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function me() { return get(meDoc()).data; }
+    function isCoach() { return signedIn() && exists(meDoc()) && me().role == 'coach'; }
+    // a coach may see a student only if they share a school and the coach coaches that sport
+    function coachOf(school, sport) { return isCoach() && me().school == school && sport in me().sports; }
+    function coachOfAny(school, sports) { return isCoach() && me().school == school && sports.hasAny(me().sports); }
+
+    // schools/{id} = { coachCode: '...' }. Created by the admin in the console. Nobody can read it from the app.
+    match /schools/{school} { allow read, write: if false; }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      // students sign up freely; coaches need their school's access code
+      allow create: if signedIn() && request.auth.uid == uid && (
+        request.resource.data.role == 'student' ||
+        (request.resource.data.role == 'coach'
+          && exists(/databases/$(database)/documents/schools/$(request.resource.data.school))
+          && request.resource.data.coachCode == get(/databases/$(database)/documents/schools/$(request.resource.data.school)).data.coachCode));
+      // nobody can change their own role; coaches cannot switch school
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role
+        && (resource.data.role == 'student' || request.resource.data.school == resource.data.school);
+    }
+
+    // a student's full plan and logs: only the student
+    match /states/{uid} { allow read, write: if signedIn() && request.auth.uid == uid; }
+
+    // progress summaries, one per sport: the student writes, that sport's coaches read
+    match /progress/{id} {
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || coachOf(resource.data.school, resource.data.sport));
+      allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid
+        && id.matches(request.auth.uid + '_.*') && me().role == 'student';
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // doctors' notes for supplements: the student and their coaches
+    match /notes/{id} {
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || coachOfAny(resource.data.school, resource.data.sports));
+      allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // a coach's decision on a note
+    match /reviews/{id} {
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || coachOfAny(resource.data.school, resource.data.sports));
+      allow create, update: if coachOfAny(request.resource.data.school, request.resource.data.sports)
+        && request.resource.data.by == request.auth.uid;
+    }
+  }
+}

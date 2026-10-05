@@ -52,7 +52,8 @@ const SPORT_PREP = {
   gymnastics: [['Wrist prep circles and rocks', '1 × 60 s'], ['Hollow body hold', '3 × 20 s'], ['Scapular pull-up (or wall slide)', '2 × 10']]
 };
 const KIT = { barbell: 'Barbell + plates', rack: 'Squat rack', bench: 'Bench', dumbbell: 'Dumbbells', kettlebell: 'Kettlebell', cable: 'Cable machine', machine: 'Leg press / machines', pullup: 'Pull-up bar', band: 'Resistance bands', box: 'Plyo box / step', medball: 'Medicine ball' };
-const ALLKIT = [...Object.keys(KIT), 'none'];
+const allKit = () => [...new Set([...Object.keys(KIT), ...(typeof EQUIP !== 'undefined' ? EQUIP.flatMap(e => e.tags) : []), 'none'])];
+const LEGACY_KIT = { machine: ['legpress', 'latpull', 'chestpress', 'rowmachine', 'legext', 'legcurl', 'shoulderpress'] };
 
 // exercise: name, pattern, equipment alternatives (any one set satisfies), level 1–3, cue, avoid tags, unit
 const EX = [];
@@ -61,7 +62,7 @@ const E = (n, p, eq, lvl, cue, avoid = [], unit = '') => EX.push({ n, p, eq, lvl
 E('Back squat', 'squat', [['barbell', 'rack']], 2, 'Brace hard, sit between the hips, drive the floor away.', ['back', 'knee']);
 E('Goblet squat', 'squat', [['dumbbell'], ['kettlebell']], 1, 'Elbows inside the knees, chest tall.', []);
 E('Front squat', 'squat', [['barbell', 'rack']], 3, 'Elbows high, stay upright.', ['back', 'knee', 'wrist']);
-E('Leg press', 'squat', [['machine']], 1, 'Feet shoulder-width, knees track over toes.', []);
+E('Leg press', 'squat', [['legpress']], 1, 'Feet shoulder-width, knees track over toes.', []);
 E('Tempo bodyweight squat', 'squat', [['none']], 1, '3 seconds down, 1 second pause at the bottom.', []);
 E('Box squat to bench', 'squat', [['bench'], ['box']], 1, 'Touch the box softly, stand tall.', []);
 // hinge
@@ -94,7 +95,7 @@ E('Band row', 'pullH', [['band']], 1, 'Squeeze the shoulder blades for one secon
 E('Inverted row (sturdy table)', 'pullH', [['none']], 1, 'Straight body, chest to the edge.', []);
 // vertical pull
 E('Pull-up', 'pullV', [['pullup']], 2, 'Full hang to chin over bar, no swinging.', ['shoulder']);
-E('Lat pulldown', 'pullV', [['cable'], ['machine']], 1, 'Pull the bar to the top of the chest.', []);
+E('Lat pulldown', 'pullV', [['latpull'], ['cable']], 1, 'Pull the bar to the top of the chest.', []);
 E('Band-assisted pull-up', 'pullV', [['pullup', 'band']], 1, 'Control the way down for 3 seconds.', []);
 E('Eccentric pull-up', 'pullV', [['pullup']], 1, 'Jump up, lower for 4–5 seconds.', []);
 E('Band lat pulldown', 'pullV', [['band']], 1, 'Anchor high, drive elbows down.', []);
@@ -142,14 +143,14 @@ const TEMPLATES = {
   FC: { name: 'Full Body C', focus: 'Single-leg + upper', slots: ['squat:1', 'pushH:1', 'pullV:1', 'single:1', 'core:2', 'hinge:2', 'arms'] },
   UA: { name: 'Upper A', focus: 'Horizontal push + pull', slots: ['pushH', 'pullH', 'pushV', 'pullV', 'arms', 'core', 'arms:1'] },
   UB: { name: 'Upper B', focus: 'Vertical push + pull', slots: ['pushV:1', 'pullV:1', 'pushH:1', 'pullH:1', 'arms:1', 'core:1', 'arms'] },
-  LA: { name: 'Lower A', focus: 'Squat pattern', slots: ['squat', 'hinge', 'single', 'core', 'carry', 'hinge:2', 'core:2'] },
-  LB: { name: 'Lower B', focus: 'Hinge pattern', slots: ['hinge:1', 'squat:1', 'single:1', 'core:2', 'carry:1', 'single:2', 'core'] },
+  LA: { name: 'Lower A', focus: 'Squat pattern', slots: ['squat', 'hinge', 'single', 'core', 'legiso', 'carry', 'hinge:2'] },
+  LB: { name: 'Lower B', focus: 'Hinge pattern', slots: ['hinge:1', 'squat:1', 'single:1', 'core:2', 'legiso:1', 'carry:1', 'single:2'] },
   PU: { name: 'Push', focus: 'Chest, shoulders, triceps', slots: ['pushH', 'pushV', 'pushH:1', 'arms:1', 'core', 'pushV:1', 'core:1'] },
   PL: { name: 'Pull', focus: 'Back, biceps, grip', slots: ['pullV', 'pullH', 'hinge:2', 'arms', 'carry', 'pullH:1', 'core:1'] },
-  LG: { name: 'Legs', focus: 'Squat, hinge, single-leg', slots: ['squat', 'hinge', 'single', 'core:2', 'carry', 'single:1', 'core'] },
+  LG: { name: 'Legs', focus: 'Squat, hinge, single-leg', slots: ['squat', 'hinge', 'single', 'legiso', 'core:2', 'carry', 'legiso:1'] },
   PU2:{ name: 'Push II', focus: 'Shoulders first', slots: ['pushV', 'pushH:1', 'pushH', 'arms:1', 'core:1', 'pushV:1', 'core'] },
   PL2:{ name: 'Pull II', focus: 'Vertical pull first', slots: ['pullH:1', 'pullV:1', 'hinge:1', 'arms', 'carry:1', 'pullV', 'core:2'] },
-  LG2:{ name: 'Legs II', focus: 'Hinge first', slots: ['hinge', 'squat:1', 'single:1', 'core', 'carry:1', 'single:2', 'core:2'] }
+  LG2:{ name: 'Legs II', focus: 'Hinge first', slots: ['hinge', 'squat:1', 'single:1', 'legiso:1', 'core', 'carry:1', 'legiso'] }
 };
 const SPLITS = { 2: ['FA', 'FB'], 3: ['FA', 'FB', 'FC'], 4: ['UA', 'LA', 'UB', 'LB'], 5: ['UA', 'LA', 'PU', 'PL', 'LG'], 6: ['PU', 'PL', 'LG', 'PU2', 'PL2', 'LG2'] };
 const DEFAULT_DAYS = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 4, 5], 6: [0, 1, 2, 3, 4, 5] };
@@ -238,13 +239,21 @@ const ALLERGY_WORDS = { dairy: ['dairy', 'milk', 'lactose', 'paneer', 'curd', 'c
    ========================================================= */
 function injuriesOf(p) { const t = (p.injuries || '').toLowerCase(); return Object.keys(INJ_WORDS).filter(k => INJ_WORDS[k].some(w => t.includes(w))); }
 function allergensOf(p) { const t = (p.allergies || '').toLowerCase(); return Object.keys(ALLERGY_WORDS).filter(k => ALLERGY_WORDS[k].some(w => t.includes(w))); }
-function kitOf(p) { if (p.where === 'gym') return ALLKIT; if (p.where === 'none') return ['none']; return [...(p.equip || []), 'none']; }
+function kitOf(p) {
+  if (p.where === 'none') return ['none'];
+  if (Array.isArray(p.gear)) return [...new Set([...p.gear.flatMap(id => (EQUIP_BY_ID[id] || {}).tags || []), 'none'])];
+  if (p.where === 'gym') return allKit();
+  return [...new Set([...(p.equip || []).flatMap(k => LEGACY_KIT[k] || [k]), 'none'])];
+}
 const LVL = { beg: 1, int: 2, adv: 3 };
 function candidates(pattern, p) {
   const kit = kitOf(p), inj = injuriesOf(p), lv = LVL[p.exp] || 1;
   const fits = e => e.eq.some(alt => alt.every(k => kit.includes(k)));
   let c = EX.filter(e => e.p === pattern && fits(e) && e.lvl <= lv && !e.avoid.some(a => inj.includes(a)));
   if (!c.length) c = EX.filter(e => e.p === pattern && fits(e) && !e.avoid.some(a => inj.includes(a)));
+  // plan around the equipment the athlete picked: bodyweight moves only fill gaps the kit cannot cover
+  const gear = e => e.eq.some(alt => !alt.includes('none') && alt.every(k => kit.includes(k)));
+  if (kit.length > 1 && c.some(gear)) c = c.filter(gear);
   return c;
 }
 function trainingDays(p) {
@@ -287,7 +296,7 @@ function buildSession(p, tKey, sIdx, phaseI, swaps = {}) {
     if (e.unit === 'm') reps = '30 m';
     if (pat === 'core' && !e.unit) reps = '8–12';
     const rest = isP ? 90 : isC ? sc.rc : sc.ra;
-    const rpe = clamp(sc.rpe + ph.rpe - (isP ? 1 : 0), 5, 9.5);
+    const rpe = clamp(sc.rpe + ph.rpe + (+p.rpeAdj || 0) - (isP ? 1 : 0), 5, 9.5);
     exs.push({ slot: i, key, pat, n: e.n, cue: e.cue, sets, reps, rest, rpe, alts: c.length });
   });
   const blocks = [];
@@ -298,7 +307,9 @@ function buildSession(p, tKey, sIdx, phaseI, swaps = {}) {
     if (B.items === 'arms') { const c = candidates('arms', p); items = c.slice(0, 2).map(e => [e.n, e.unit === 's' ? '2 × 20 s' : '2 × 12–15']); if (!items.length) items = [['Push-up to failure', '2 sets']]; }
     blocks.push({ t: B.t, min: B.min, items, why: GOALS[g].label });
   });
-  if (p.goal === 'lean' || p.goal === 'endurance') blocks.push({ t: 'Finisher', min: 6, items: p.goal === 'lean' ? [['Bike, row or shuttle runs: 20 s hard, 40 s easy', '× 6']] : [['Easy aerobic flush (talk-test pace)', '10 min']], why: GOALS[p.goal].label });
+  const cm = typeof cardioOf === 'function' ? cardioOf(p) : null;
+  blocks.forEach(b => { if (cm && b.t === 'Tempo intervals') b.items = [[`${cm}: 1 min hard, 1 min easy`, '× 5']]; if (cm && b.t === 'Conditioning finisher') b.items = [[`${cm}: 20 s all-out, 40 s easy`, '× 8']]; });
+  if (p.goal === 'lean' || p.goal === 'endurance') blocks.push({ t: 'Finisher', min: 6, items: p.goal === 'lean' ? [[`${cm || 'Shuttle runs'}: 20 s hard, 40 s easy`, '× 6']] : [[`${cm ? cm + ', easy' : 'Easy aerobic flush'} (talk-test pace)`, '10 min']], why: GOALS[p.goal].label });
   if (p.goal === 'mobility' && !(p.extra || []).includes('mobility')) blocks.push({ t: 'Mobility flow', min: 8, items: EXTRA_BLOCK.mobility.text, why: 'Main goal' });
   let prep = null;
   if ((p.sports || []).length) { const sp = p.sports[sIdx % p.sports.length]; prep = { sport: SPORTS[sp], items: SPORT_PREP[sp].slice(0, 2) }; }
@@ -318,7 +329,7 @@ function targets(p, training = true) {
   const bmr = 10 * w + 6.25 * h - 5 * a + (p.sex === 'f' ? -161 : 5);
   const af = { 2: 1.45, 3: 1.55, 4: 1.6, 5: 1.7, 6: 1.8 }[p.sessions] || 1.55;
   const adj = { muscle: 1.1, strength: 1.05, lean: a < 18 ? 0.92 : 0.85, general: 1, endurance: 1.1, speed: 1.05, mobility: 1 }[p.goal];
-  const kcal = Math.round(bmr * af * adj / 10) * 10;
+  const kcal = Math.round((bmr * af * adj + (+p.kcalAdj || 0)) / 10) * 10;
   const ppk = { muscle: 1.8, strength: 1.8, lean: 2.0, general: 1.5, endurance: 1.5, speed: 1.7, mobility: 1.4 }[p.goal];
   const protein = Math.round(w * ppk);
   const fat = Math.round(kcal * 0.27 / 9);
