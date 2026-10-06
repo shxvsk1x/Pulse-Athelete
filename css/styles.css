@@ -1385,3 +1385,21 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; line-height
 .flinks a { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 550; color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-3); text-underline-offset: 3px; }
 .flinks svg { width: 14px; height: 14px; }
 @media (max-width: 620px) { .vthumb { width: 72px; } .vthumb.sm { width: 60px; } .ex-main { gap: 10px; } .vplay { width: 24px; height: 24px; } }
+
+/* ---------- hydration reminder ---------- */
+.hydra { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 18px; border-radius: var(--r-3); border: 1px solid color-mix(in srgb, var(--water) 40%, var(--line)); background: linear-gradient(90deg, var(--water-bg), transparent 75%), var(--surface); }
+.hydra.behind { border-color: color-mix(in srgb, var(--water) 70%, var(--line)); box-shadow: 0 0 0 3px var(--water-bg); }
+.hydra-ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--water); color: #fff; animation: drip 2.4s var(--ease-in-out) infinite; }
+.hydra-ic svg { width: 21px; height: 21px; }
+@keyframes drip { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.hydra b { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; }
+.hydra p { color: var(--ink-2); font-size: 13.5px; margin-top: 2px; }
+.hydra-acts { display: flex; gap: 4px; align-items: center; }
+@media (max-width: 620px) { .hydra { grid-template-columns: 38px minmax(0, 1fr); padding: 14px; } .hydra-ic { width: 38px; height: 38px; } .hydra-acts { grid-column: 2; } }
+@media (prefers-reduced-motion: reduce) { .hydra-ic { animation: none; } }
+.water-tip, .w-why { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.45; color: var(--ink-2); padding: 10px 12px; border-radius: var(--r-2); background: var(--water-bg); margin-top: 12px; }
+.water-tip svg, .w-why svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--water); }
+.water-tip b, .w-why b { color: var(--ink); font-weight: 600; }
+.live-water { display: flex; gap: 10px; align-items: center; padding: 10px 22px; font-size: 13px; color: var(--ink-2); background: var(--water-bg); border-bottom: 1px solid var(--line); }
+.live-water > svg { width: 16px; height: 16px; flex: none; color: var(--water); }
+.live-water span { flex: 1; min-width: 0; }
