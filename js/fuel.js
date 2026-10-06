@@ -28,6 +28,7 @@ function waterCard(big = false) {
         <button class="w-glass add" data-act="glass-new"><span class="gi">${IC.camera}</span><b>Add your glass</b><span>Photo + size</span></button>
       </div>
       <form class="w-ml" data-form="ml" novalidate><div class="input-wrap" style="flex:1"><input class="input num" id="ml-in" type="number" inputmode="numeric" min="10" max="3000" step="10" placeholder="Type an amount" aria-label="Water in millilitres"><span class="suffix">ml</span></div><button class="btn btn-primary" type="submit">${IC.plus}Add</button></form>
+      <p class="w-why">${IC.info}<span><b>Dehydration is very common in athletes</b> and easy to miss: thirst shows up late. Drink steadily through the day, not all at once.</span></p>
       <div class="w-foot">${(S.log.drinks && S.log.drinks[ds] || []).length ? `<button class="btn btn-quiet btn-sm" data-act="drink-undo">${IC.reset}Undo last</button>` : '<span></span>'}<button class="btn btn-quiet btn-sm" data-act="water-remind">${IC.bell}${PREFS.remind ? `Reminders every ${PREFS.remind} min` : 'Set reminders'}</button></div>
     </div>`;
 }
@@ -345,3 +346,31 @@ document.addEventListener('submit', e => {
   if (!v) { $('#ml-in').focus(); return; }
   addDrink(v);
 });
+
+/* ---------------- hydration reminder note ---------------- */
+// dehydration is one of the most common problems in young athletes, so Pulse keeps a short note in view
+const WATER_FACTS = [
+  'Most young athletes start training already a little dehydrated, often without feeling thirsty.',
+  'Losing just 2% of your body weight in sweat makes you weaker, slower and worse at decisions.',
+  'Thirst kicks in late. By the time you feel it, you are already behind.',
+  'Even mild dehydration makes training feel harder and causes headaches, cramps and tiredness.',
+  'Dark yellow pee means drink more. Pale straw colour means you are on track.',
+  'On hot days you can sweat out more than a litre in an hour of training.'
+];
+function waterFact() { const d = parseIso(today()); return WATER_FACTS[(d.getDate() + d.getMonth()) % WATER_FACTS.length]; }
+function hydrationNote() {
+  if (!S) return '';
+  if (S.waterNoteHidden === today()) return '';
+  const goal = targets(S.profile, !!sessionFor(new Date())).water, ml = waterMl(today()), pace = waterPace(goal);
+  if (ml >= goal) return '';
+  const behind = ml < pace - 150;
+  return `<section class="c-12 hydra ${behind ? 'behind' : ''}" role="note" aria-label="Hydration reminder">
+    <span class="hydra-ic">${IC.drop}</span>
+    <div style="min-width:0"><b>${behind ? `Don’t forget your water: you’re ${fmtMl(pace - ml)} behind.` : 'Don’t miss out on water today.'}</b>
+      <p>Dehydration is very common in athletes. ${esc(waterFact())}</p></div>
+    <div class="hydra-acts"><button class="btn btn-primary btn-sm" data-act="drink" data-ml="250">${IC.plus}250 ml</button><button class="icon-btn sm" data-act="water-note-hide" aria-label="Hide the water reminder for today" data-tip="Hide for today">${IC.x}</button></div>
+  </section>`;
+}
+/* one-line tip used next to sessions */
+const sessionWaterTip = () => `<p class="water-tip">${IC.drop}<span><b>Bring a water bottle.</b> Sip 150–250 ml every 15–20 minutes while you train, then drink about 500 ml in the hour after.</span></p>`;
+Object.assign(ACT, { 'water-note-hide': () => { S.waterNoteHidden = today(); save(); const y = scrollY; refresh(); window.scrollTo(0, y); toast('Water reminder hidden until tomorrow. Keep sipping!', { icon: IC.drop }); } });

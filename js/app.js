@@ -528,7 +528,7 @@ VIEWS.today = () => {
   return `<div class="ph"><div><div class="label">${DAYS_L[wd(d)]} · ${fmtDate(d)}</div><h2 style="margin-top:8px">${greet()}, <em>${esc(p.name)}.</em></h2><p>${line}</p></div>
     <div class="ph-actions"><span class="pill line">Week ${i + 1} · ${ph.n}</span></div></div>
     <div class="dash stagger">
-      ${weighInCard()}${adjustCard()}
+      ${hydrationNote()}${weighInCard()}${adjustCard()}
       <section class="card card-pad c-7" aria-labelledby="t-sess">${todaySessionCard(sess, done)}</section>
       <section class="card water-card c-5">${waterCard()}</section>
       <section class="card c-6" aria-labelledby="t-ready">${readinessCard()}</section>
@@ -643,6 +643,7 @@ function sessionDetail(sess, date, done, isToday) {
       <div class="ph-actions">${done ? `<span class="pill good">${IC.check.replace('<svg', '<svg width="12" height="12"')} Logged · RPE ${done.rpe}</span>` : ''}<span class="pill line">${IC.clock.replace('<svg', '<svg width="12" height="12"')} ≈ ${sess.mins} min</span><span class="pill line" data-tip="Rate of perceived exertion, 1 to 10">RPE ${rpe}</span>
       ${isToday && !done ? `<button class="btn btn-primary btn-sm" data-act="start">${IC.play}Start</button>` : ''}</div></div>
     <div class="sess-sec"><div class="label"><span>Warm-up · RAMP · 6 min</span></div><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${formLinks(b)}</span></span><span>${c}</span></li>`).join('')}</ul></div>
+    <div class="sess-sec" style="padding-top:0;border-top:0">${sessionWaterTip()}</div>
     <div class="sess-sec"><div class="label"><span>Main work · ${plural(sess.exs.length, 'exercise')}</span><span class="hide-m">Sets × reps · rest · effort</span></div>
       ${sess.exs.map((e, i) => `<div class="ex" data-ex="${esc(e.key)}"><span class="i">${String(i + 1).padStart(2, '0')}</span>
         <div class="ex-main">${formThumb(e.n)}<div style="min-width:0"><h5>${esc(e.n)}</h5><p>${esc(e.cue)}</p>${formOf(e.n) ? `<button type="button" class="ex-form" data-act="form" data-n="${esc(e.n)}">${PLAY}Watch form</button>` : ''}</div></div>
@@ -683,7 +684,7 @@ VIEWS.session = () => {
     <div class="dash">
       <div class="card c-5"><div class="card-h"><h3>Warm up first</h3><span class="label">6 min</span></div><div class="card-b"><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${formLinks(b)}</span></span><span>${c}</span></li>`).join('')}</ul></div></div>
       <div class="card c-7"><div class="card-h"><h3>What is coming</h3><span class="label">${sess.phase.n} week</span></div><div class="card-b"><ol class="ex-peek" style="margin:0">${sess.exs.map((e, i) => `<li><span class="i">${String(i + 1).padStart(2, '0')}</span><span>${formName(e.n)}</span><span class="sr2">${e.sets} × ${e.reps}</span></li>`).join('')}</ol>
-      <p class="muted" style="font-size:13px;margin-top:14px">Tap any exercise to watch how it is done. During the session, tap each set as you finish it.</p></div></div>
+      <p class="muted" style="font-size:13px;margin-top:14px">Tap any exercise to watch how it is done. During the session, tap each set as you finish it.</p>${sessionWaterTip()}</div></div>
     </div>`;
 };
 function liveSession() {
@@ -695,6 +696,7 @@ function liveSession() {
     <div class="live-head"><div><div class="label" style="display:flex;gap:8px;align-items:center"><span class="dot live"></span>Live · ${sess.phase.n} week${a.from !== a.date ? ' · from ' + DAYS[wd(parseIso(a.from))] : ''}</div><h3 style="margin-top:6px">${esc(sess.name)}</h3></div>
       <div style="text-align:right"><div class="clock" id="clock" aria-label="Elapsed time">${hms((Date.now() - a.start) / 1000)}</div><div class="label" style="margin-top:6px" id="sets-lbl">${dn} / ${tot} sets</div></div></div>
     <div class="live-progress" role="progressbar" aria-label="Sets completed" aria-valuemin="0" aria-valuemax="${tot}" aria-valuenow="${dn}"><i id="live-bar" style="width:${tot ? dn / tot * 100 : 0}%"></i></div>
+    <div class="live-water">${IC.drop}<span>Sip water between sets: 150–250 ml every 15–20 minutes.</span><button class="btn btn-quiet btn-sm" data-act="drink" data-ml="200">${IC.plus}Log 200 ml</button></div>
     ${sess.exs.map(e => {
       const arr = a.sets[e.key] || [], complete = arr.filter(Boolean).length >= e.sets, last = lastKg(e.n), kg = a.kg[e.n] ?? last ?? '';
       return `<div class="lx ${complete ? 'complete' : ''}" data-lx="${esc(e.key)}">
