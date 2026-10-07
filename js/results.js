@@ -79,7 +79,7 @@ async function buildPrivate(o, onProg) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || isNaN(new Date(dob))) { errs.push(`Row ${r + 1} (${name}): date of birth must look like 2009-05-14.`); continue; }
     const code = o.codes === 'gen' ? genCode() : o.codes === 'file' ? (R[col('code')] || '').trim() : '';
     if (o.codes === 'file' && !code) { errs.push(`Row ${r + 1} (${name}): code is empty.`); continue; }
-    const key = [normName(name), normId(id), dob, normId(code)].join('|');
+    const key = [normName(name), normId(id), dob].join('|');
     if (seen.has(key)) { errs.push(`Row ${r + 1} (${name}): duplicate of an earlier row.`); continue; } seen.add(key);
     const scores = ci.map(i => { const v = (R[i] || '').trim(); return v === '' ? '' : +v; });
     if (scores.some(v => v !== '' && !isFinite(v))) { errs.push(`Row ${r + 1} (${name}): scores must be numbers (leave blank if not attempted).`); continue; }
