@@ -29,7 +29,7 @@ const Cloud = (() => {
 
   /* ---------------- LOCAL (demo) backend ---------------- */
   const L = {
-    db() { return lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; },
+    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; return d; },
     put(db) { if (!lsSet('pulse.cloud', db)) throw err('This browser is out of storage space.'); },
     async init() { const uid = lsGet('pulse.cloud.session'); const u = uid && L.db().users[uid]; me = u ? L.pub(u) : null; },
     pub(u) { const { hash, ...rest } = u; return rest; },
@@ -66,6 +66,10 @@ const Cloud = (() => {
     async getNote(id) { return L.db().notes[id] || null; },
     async putReview(id, d) { const db = L.db(); db.reviews[id] = Object.assign({}, d, { by: me.uid, byName: me.name, at: Date.now() }); L.put(db); },
     async getReview(id) { return L.db().reviews[id] || null; },
+    async eventsList(school) { return Object.values(L.db().events).filter(e => !school || e.school === school).map(e => JSON.parse(e.json)); },
+    async putEvent(ev, rows) { const db = L.db(); db.events[ev.id] = { school: ev.school, json: JSON.stringify(ev) }; rows.forEach(r => db.results[ev.id + '_' + r.tag] = { event: ev.id, school: ev.school, iv: r.iv, c: r.c }); L.put(db); },
+    async deleteEvent(id) { const db = L.db(); delete db.events[id]; Object.keys(db.results).forEach(k => { if (db.results[k].event === id) delete db.results[k]; }); L.put(db); },
+    async getResult(evId, tag) { return L.db().results[evId + '_' + tag] || null; },
     async myReviews() { const out = {}; Object.entries(L.db().reviews).forEach(([k, r]) => { if (r.uid === me.uid) out[k] = r; }); return out; }
   };
 
@@ -144,6 +148,21 @@ const Cloud = (() => {
     async getNote(id) { const s = await fb.db.doc('notes/' + id).get(); return s.exists ? s.data() : null; },
     async putReview(id, d) { try { await fb.db.doc('reviews/' + id).set(Object.assign({}, d, { by: me.uid, byName: me.name, at: Date.now() })); } catch (e) { throw fbErr(e); } },
     async getReview(id) { const s = await fb.db.doc('reviews/' + id).get(); return s.exists ? s.data() : null; },
+    async eventsList(school) { let q = fb.db.collection('events'); if (school) q = q.where('school', '==', school); const snap = await q.get(); return snap.docs.map(d => JSON.parse(d.data().json)); },
+    async putEvent(ev, rows) {
+      try {
+        for (let i = 0; i < rows.length; i += 400) { const b = fb.db.batch(); rows.slice(i, i + 400).forEach(r => b.set(fb.db.doc('results/' + ev.id + '_' + r.tag), { event: ev.id, school: ev.school, iv: r.iv, c: r.c })); await b.commit(); }
+        await fb.db.doc('events/' + ev.id).set({ school: ev.school, kind: ev.kind, title: ev.title, date: ev.date, json: JSON.stringify(ev) });
+      } catch (e) { throw fbErr(e); }
+    },
+    async deleteEvent(id) {
+      try {
+        const q = await fb.db.collection('results').where('school', '==', me.school).where('event', '==', id).get();
+        for (let i = 0; i < q.docs.length; i += 400) { const b = fb.db.batch(); q.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
+        await fb.db.doc('events/' + id).delete();
+      } catch (e) { throw fbErr(e); }
+    },
+    async getResult(evId, tag) { try { const s = await fb.db.doc('results/' + evId + '_' + tag).get(); return s.exists ? s.data() : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); } },
     async myReviews() { const q = await fb.db.collection('reviews').where('uid', '==', me.uid).get(); const out = {}; q.forEach(d => out[d.id] = d.data()); return out; }
   };
 
@@ -155,7 +174,8 @@ const Cloud = (() => {
     signUp: d => B.signUp(d), signIn: (e, p) => B.signIn(e, p), signOut: () => B.signOut(), resetPassword: e => B.resetPassword(e),
     updateProfile: f => B.updateProfile(f), loadState: () => B.loadState(), saveState: s => B.saveState(s),
     publishProgress: d => B.publishProgress(d), coachRoster: () => B.coachRoster(),
-    putNote: (i, d) => B.putNote(i, d), getNote: i => B.getNote(i), putReview: (i, d) => B.putReview(i, d), getReview: i => B.getReview(i), myReviews: () => B.myReviews()
+    putNote: (i, d) => B.putNote(i, d), getNote: i => B.getNote(i), putReview: (i, d) => B.putReview(i, d), getReview: i => B.getReview(i), myReviews: () => B.myReviews(),
+    eventsList: s => B.eventsList(s), putEvent: (e, r) => B.putEvent(e, r), deleteEvent: i => B.deleteEvent(i), getResult: (e, t) => B.getResult(e, t)
   };
   return api;
 })();

@@ -3,7 +3,7 @@
    ========================================================= */
 
 const LS = 'pulse.v3', LS_DRAFT = 'pulse.draft', LS_PREFS = 'pulse.prefs', LS_THEME = 'pulse.theme';
-const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'profile'];
+const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'results', 'profile'];
 const LANDING_SECTIONS = ['method', 'product', 'block', 'science', 'faq'];
 const VIEW_META = {
   today: { t: 'Today', ic: 'today' },
@@ -13,6 +13,7 @@ const VIEW_META = {
   progress: { t: 'Progress', ic: 'progress' },
   ask: { t: 'Ask Pulse', ic: 'chat' },
   coach: { t: 'Coach', ic: 'coach' },
+  results: { t: 'Results', ic: 'medal' },
   profile: { t: 'Profile', ic: 'profile' }
 };
 
@@ -858,7 +859,8 @@ VIEWS.progress = () => {
   const zone = r == null ? null : r < 0.8 ? ['Under-loaded', 'Training is lighter than usual. Fine in a deload, otherwise add a session.'] : r <= 1.3 ? ['Sweet spot', 'This week matches what your body is used to. Good place to be.'] : r <= 1.5 ? ['Caution', 'Load is climbing quickly. Sleep and eat well this week.'] : ['Spike', 'This week is well above your recent average. Injury risk climbs here, so ease off.'];
   const hist = (UI.histFilter === 'block' ? inBlock : ss).slice().reverse();
   const pb = bests().slice(0, 6), got = S.badges || {};
-  return `<div class="ph"><div><div class="label">${plural(ss.length, 'session')} logged</div><h2 style="margin-top:8px">Your <em>progress.</em></h2></div></div>
+  return `<div class="ph"><div><div class="label">${plural(ss.length, 'session')} logged</div><h2 style="margin-top:8px">Your <em>progress.</em></h2></div><div class="ph-actions"><a class="btn btn-ghost btn-sm" href="#/results">${IC.medal}School results</a></div></div>
+    ${(S.pins || []).length ? `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>My school pins</h3></div><div class="card-b">${S.pins.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0"><div><b>${esc(p.title)}</b><div class="muted" style="font-size:13px">${esc(fmtDate(p.date))}</div></div>${pinPill(p.pin)}</div>`).join('')}</div></div>` : ''}
     <div class="stats stagger" style="margin-bottom:16px">
       <div><span class="label">This block</span><b>${inBlock.length}<small>/ ${planned * weeksIn}</small></b><span class="delta">sessions so far</span></div>
       <div><span class="label">Streak</span><b>${weekStreak()}<small>${weekStreak() === 1 ? 'week' : 'weeks'}</small></b><span class="delta">of full weeks</span></div>

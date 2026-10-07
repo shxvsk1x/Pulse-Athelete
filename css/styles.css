@@ -1403,3 +1403,11 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; line-height
 .live-water { display: flex; gap: 10px; align-items: center; padding: 10px 22px; font-size: 13px; color: var(--ink-2); background: var(--water-bg); border-bottom: 1px solid var(--line); }
 .live-water > svg { width: 16px; height: 16px; flex: none; color: var(--water); }
 .live-water span { flex: 1; min-width: 0; }
+
+/* school results */
+.res-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+.res-t th { text-align: left; font: 500 11px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 6px 8px 8px 0; }
+.res-t td { padding: 9px 8px 9px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.res-ev { display: block; width: 100%; padding: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; transition: transform var(--t-2) var(--ease), border-color var(--t-2) var(--ease); }
+.res-ev:hover { border-color: var(--ink-3); }
+.stack { display: grid; gap: 12px; }

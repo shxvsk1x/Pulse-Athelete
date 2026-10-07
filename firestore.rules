@@ -51,5 +51,22 @@ service cloud.firestore {
       allow create, update: if coachOfAny(request.resource.data.school, request.resource.data.sports)
         && request.resource.data.by == request.auth.uid;
     }
+
+    // school events. Titles, criteria and public winners are readable by anyone; only that school's coaches can write.
+    match /events/{id} {
+      allow read: if true;
+      allow create, update: if isCoach() && request.resource.data.school == me().school;
+      allow delete: if isCoach() && resource.data.school == me().school;
+    }
+
+    // personal results, stored encrypted. The document id is derived from the student's name, ID and date of birth
+    // (and access code), so a student can fetch only their own by knowing it. Nobody can list the collection except
+    // the school's coaches, who can see only encrypted data.
+    match /results/{id} {
+      allow get: if signedIn();
+      allow list: if isCoach() && resource.data.school == me().school;
+      allow create, update: if isCoach() && request.resource.data.school == me().school;
+      allow delete: if isCoach() && resource.data.school == me().school;
+    }
   }
 }

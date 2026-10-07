@@ -16,6 +16,7 @@ Training and fuel planning for student athletes. Tell Pulse your sport, schedule
 - **Weekly weigh-in**: if weight is not moving towards the goal, Pulse adjusts calories (within safe limits for under-18s) and sometimes intensity, and tells the athlete and coaches why
 - **Ask Pulse**: a built-in coach for nutrition, training and recovery questions. It can change the plan, but only when the change helps progress, and it pushes back on bad habits
 - **Coach tab (students)**: which coaches can see them, a preview of exactly what they see, and what stays private
+- **School results**: students search school events. Public events (inter-house, sports day) show winners and house points to anyone. Personal events (a functional fitness test with bronze, silver and gold pins) need the student's name, school ID and date of birth, plus an access code if the school uses one. Coaches publish results in the **Results** tab from a CSV and the school's own pin criteria
 - **Coach dashboard**: every student at the school who plays a sport the coach coaches, with flags, weigh-in trends, habits and a queue of doctors' notes to verify. Multi-sport athletes are visible to each of their sports' coaches
 
 ## Tech
@@ -36,6 +37,7 @@ js/fuel.js       Fuel tab: water, meal plan, food guard, supplements
 js/auth.js       welcome, sign up, log in, sync
 js/coach.js      weigh-ins, plan adjustment, Coach tab, coach dashboard
 js/ask.js        Ask Pulse chatbot
+js/results.js    school events, encrypted personal results, pins
 js/landing.js    the "What is Pulse?" page
 firestore.rules  database security rules
 ```
@@ -56,6 +58,17 @@ Run locally with any static server, for example `python3 -m http.server`.
 The Firebase web config is meant to be public; the security rules are what protect the data. Students can only read their own plan. Coaches can only read progress summaries and doctors' notes for students at their school who play a sport they coach.
 
 To add another school, add it to `schools` in `js/config.js` and create a matching `schools/<id>` document with its own `coachCode`.
+
+## School results and pins
+
+Coaches: **Results** tab, **Add an event**.
+
+- **Public** (inter-house, sports day): CSV with `category,place,name` and optional `house,result`. House points (5, 3, 1) are added up for you.
+- **Personal** (fitness test): write the criteria one test per line as `Test | unit | higher or lower | bronze | silver | gold` (each number is the minimum for that pin), then a CSV with `name,id,dob` (YYYY-MM-DD), one column per test, and an optional `note`. Choose whether the overall pin is the lowest or the average level, and let Pulse generate an access code per student. Download the codes straight away; they are not stored.
+
+How personal results are protected: the browser turns name + ID + date of birth (+ code) into a lookup id and an encryption key (PBKDF2-SHA512, 150,000 rounds). Only the encrypted result is stored, under that id. The rules in `firestore.rules` let a signed-in student fetch one document by id but never list the collection, and coaches can only see encrypted data. The browser also slows repeated wrong tries.
+
+Honest limit: the id is guessable by someone who knows a classmate's name, ID and birthday, so **use access codes**. After changing `firestore.rules`, publish them again in the Firebase console. For stronger protection add Firebase App Check or a Cloud Function that rate-limits lookups.
 
 ## Privacy
 
