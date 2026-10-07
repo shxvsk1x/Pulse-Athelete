@@ -173,7 +173,7 @@ function progressDocsPreview() {
 
 /* ---------------- coach dashboard ---------------- */
 const COACH = { roster: [], pending: [], loaded: false, loading: false, err: '', f: { sport: 'all', grade: 'all', q: '' } };
-const COACH_VIEWS = { students: ['Students', 'coach'], verify: ['Verify notes', 'shield'], account: ['Account', 'profile'] };
+const COACH_VIEWS = { students: ['Students', 'coach'], verify: ['Verify notes', 'shield'], results: ['Results', 'medal'], account: ['Account', 'profile'] };
 async function coachLoad() {
   COACH.loading = true;
   try {
@@ -205,7 +205,7 @@ function showCoachApp(path) {
       <div class="main"><header class="topbar" id="topbar"><a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse</a><h1 class="pg" id="pg-title"></h1>
         <div class="topbar-r"><button class="icon-btn" data-act="coach-reload" aria-label="Refresh" data-tip="Refresh">${IC.reset}</button><button class="icon-btn" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button><a class="top-avatar" href="#/account" aria-label="Account">${esc(initials(u.name))}</a></div></header>
         <main class="content" id="main" tabindex="-1"></main></div></div>
-      <nav class="tabbar" aria-label="Main" style="grid-template-columns:repeat(3,1fr)">${Object.entries(COACH_VIEWS).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t.split(' ')[0]}</span></a>`).join('')}</nav></div>`);
+      <nav class="tabbar" aria-label="Main" style="grid-template-columns:repeat(4,1fr)">${Object.entries(COACH_VIEWS).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t.split(' ')[0]}</span></a>`).join('')}</nav></div>`);
   }
   coachDraw();
   if (!COACH.loaded && !COACH.loading) coachLoad().then(coachDraw);
@@ -221,7 +221,7 @@ function coachDraw() {
   const c = $('#main');
   c.innerHTML = !COACH.loaded ? `<div class="empty" style="padding:80px 8px"><span class="spin lg"></span><h4>Loading your students…</h4></div>`
     : COACH.err ? `<div class="card"><div class="empty"><div class="glyph">${IC.alert}</div><h4>Could not load</h4><p>${esc(COACH.err)}</p><div class="acts"><button class="btn btn-primary btn-sm" data-act="coach-reload">Try again</button></div></div></div>`
-    : ({ students: coachStudents, student: coachStudent, verify: coachVerify, account: coachAccount }[v])();
+    : ({ students: coachStudents, student: coachStudent, verify: coachVerify, results: resCoachView, account: coachAccount }[v])();
   animateIn(c); bindChartTips(c);
 }
 function coachStudents() {
