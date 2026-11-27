@@ -27,9 +27,14 @@ const Cloud = (() => {
     let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return 'x' + h;
   }
 
+  const pairId = (x, y) => x < y ? x + '_' + y : y + '_' + x;
+  const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/I so a code is easy to read out
+  const newCode = free => { for (let i = 0; i < 20; i++) { let c = ''; const r = crypto.getRandomValues ? crypto.getRandomValues(new Uint8Array(8)) : Array.from({ length: 8 }, () => Math.floor(Math.random() * 256)); for (let k = 0; k < 8; k++) c += CODE_CHARS[r[k] % CODE_CHARS.length]; if (free(c)) return c; } throw err('Could not make a friend code. Try again.'); };
+  const cleanCode = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
   /* ---------------- LOCAL (demo) backend ---------------- */
   const L = {
-    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; return d; },
+    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; d.friends = d.friends || { codes: {}, ships: {}, feed: {} }; return d; },
     put(db) { if (!lsSet('pulse.cloud', db)) throw err('This browser is out of storage space.'); },
     async init() { const uid = lsGet('pulse.cloud.session'); const u = uid && L.db().users[uid]; me = u ? L.pub(u) : null; },
     pub(u) { const { hash, ...rest } = u; return rest; },
@@ -70,6 +75,25 @@ const Cloud = (() => {
     async putEvent(ev, rows) { const db = L.db(); db.events[ev.id] = { school: ev.school, json: JSON.stringify(ev) }; rows.forEach(r => db.results[ev.id + '_' + r.tag] = { event: ev.id, school: ev.school, iv: r.iv, c: r.c }); L.put(db); },
     async deleteEvent(id) { const db = L.db(); delete db.events[id]; Object.keys(db.results).forEach(k => { if (db.results[k].event === id) delete db.results[k]; }); L.put(db); },
     async getResult(evId, tag) { return L.db().results[evId + '_' + tag] || null; },
+    /* friends */
+    async friendCode() {
+      const db = L.db(), u = db.users[me.uid];
+      if (u.friendCode && db.friends.codes[u.friendCode]) return u.friendCode;
+      const code = newCode(c => !db.friends.codes[c]);
+      db.friends.codes[code] = { uid: me.uid, name: me.name }; u.friendCode = code; L.put(db); me = L.pub(u); return code;
+    },
+    async findCode(code) { const c = L.db().friends.codes[code]; return c ? { uid: c.uid, name: c.name } : null; },
+    async requestFriend(other) {
+      const db = L.db(), id = pairId(me.uid, other.uid);
+      if (db.friends.ships[id]) throw err(db.friends.ships[id].status === 'accepted' ? 'You are already friends.' : 'A request between you two is already open.');
+      db.friends.ships[id] = { a: me.uid < other.uid ? me.uid : other.uid, b: me.uid < other.uid ? other.uid : me.uid, aName: me.uid < other.uid ? me.name : other.name, bName: me.uid < other.uid ? other.name : me.name, from: me.uid, status: 'pending', at: Date.now() };
+      L.put(db);
+    },
+    async myFriendships() { return Object.entries(L.db().friends.ships).filter(([, v]) => v.a === me.uid || v.b === me.uid).map(([id, v]) => Object.assign({ id }, v)); },
+    async acceptFriend(id) { const db = L.db(), v = db.friends.ships[id]; if (!v || v.from === me.uid || (v.a !== me.uid && v.b !== me.uid)) throw err('That request is no longer there.'); v.status = 'accepted'; L.put(db); },
+    async removeFriend(id) { const db = L.db(), v = db.friends.ships[id]; if (v && (v.a === me.uid || v.b === me.uid)) { delete db.friends.ships[id]; L.put(db); } },
+    async publishFeed(doc) { const db = L.db(); db.friends.feed[me.uid] = doc; L.put(db); },
+    async getFeed(uid) { const db = L.db(), v = db.friends.ships[pairId(me.uid, uid)]; if (!v || v.status !== 'accepted') return null; return db.friends.feed[uid] || null; },
     async myReviews() { const out = {}; Object.entries(L.db().reviews).forEach(([k, r]) => { if (r.uid === me.uid) out[k] = r; }); return out; }
   };
 
@@ -163,6 +187,37 @@ const Cloud = (() => {
       } catch (e) { throw fbErr(e); }
     },
     async getResult(evId, tag) { try { const s = await fb.db.doc('results/' + evId + '_' + tag).get(); return s.exists ? s.data() : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); } },
+    /* friends */
+    async friendCode() {
+      if (me.friendCode) return me.friendCode;
+      for (let i = 0; i < 6; i++) {
+        const code = newCode(() => true), ref = fb.db.doc('friendCodes/' + code);
+        try {
+          if ((await ref.get()).exists) continue;
+          await ref.set({ uid: me.uid, name: me.name });
+          await fb.db.doc('users/' + me.uid).update({ friendCode: code }); me.friendCode = code; return code;
+        } catch (e) { if (i === 5) throw fbErr(e); }
+      }
+      throw err('Could not make a friend code. Try again.');
+    },
+    async findCode(code) { try { const s = await fb.db.doc('friendCodes/' + code).get(); return s.exists ? { uid: s.data().uid, name: s.data().name } : null; } catch (e) { throw fbErr(e); } },
+    async requestFriend(other) {
+      const id = pairId(me.uid, other.uid), ref = fb.db.doc('friendships/' + id);
+      let cur = null; try { cur = await ref.get(); } catch (e) { /* not ours to read: it does not exist */ }
+      if (cur && cur.exists) throw err(cur.data().status === 'accepted' ? 'You are already friends.' : 'A request between you two is already open.');
+      const mine = me.uid < other.uid;
+      try { await ref.set({ a: mine ? me.uid : other.uid, b: mine ? other.uid : me.uid, aName: mine ? me.name : other.name, bName: mine ? other.name : me.name, from: me.uid, status: 'pending', at: Date.now() }); } catch (e) { throw fbErr(e); }
+    },
+    async myFriendships() {
+      try {
+        const col = fb.db.collection('friendships'), [x, y] = await Promise.all([col.where('a', '==', me.uid).get(), col.where('b', '==', me.uid).get()]);
+        const out = []; x.forEach(d => out.push(Object.assign({ id: d.id }, d.data()))); y.forEach(d => out.push(Object.assign({ id: d.id }, d.data()))); return out;
+      } catch (e) { throw fbErr(e); }
+    },
+    async acceptFriend(id) { try { await fb.db.doc('friendships/' + id).update({ status: 'accepted' }); } catch (e) { throw fbErr(e); } },
+    async removeFriend(id) { try { await fb.db.doc('friendships/' + id).delete(); } catch (e) { throw fbErr(e); } },
+    async publishFeed(doc) { try { await fb.db.doc('friendFeed/' + me.uid).set(doc); } catch (e) { throw fbErr(e); } },
+    async getFeed(uid) { try { const s = await fb.db.doc('friendFeed/' + uid).get(); return s.exists ? s.data() : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); } },
     async myReviews() { const q = await fb.db.collection('reviews').where('uid', '==', me.uid).get(); const out = {}; q.forEach(d => out[d.id] = d.data()); return out; }
   };
 
@@ -175,6 +230,7 @@ const Cloud = (() => {
     updateProfile: f => B.updateProfile(f), loadState: () => B.loadState(), saveState: s => B.saveState(s),
     publishProgress: d => B.publishProgress(d), coachRoster: () => B.coachRoster(),
     putNote: (i, d) => B.putNote(i, d), getNote: i => B.getNote(i), putReview: (i, d) => B.putReview(i, d), getReview: i => B.getReview(i), myReviews: () => B.myReviews(),
+    friendCode: () => B.friendCode(), findCode: c => B.findCode(cleanCode(c)), requestFriend: o => B.requestFriend(o), myFriendships: () => B.myFriendships(), acceptFriend: i => B.acceptFriend(i), removeFriend: i => B.removeFriend(i), publishFeed: d => B.publishFeed(d), getFeed: u => B.getFeed(u), cleanCode,
     eventsList: s => B.eventsList(s), putEvent: (e, r) => B.putEvent(e, r), deleteEvent: i => B.deleteEvent(i), getResult: (e, t) => B.getResult(e, t)
   };
   return api;

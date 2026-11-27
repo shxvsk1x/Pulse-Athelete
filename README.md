@@ -15,6 +15,10 @@ Training and fuel planning for student athletes. Tell Pulse your sport, schedule
 - **Supplements**: under-18s need a doctor's note for anything with side effects, verified by one of their coaches. Fat burners, test boosters and SARMs are blocked
 - **Weekly weigh-in**: if weight is not moving towards the goal, Pulse adjusts calories (within safe limits for under-18s) and sometimes intensity, and tells the athlete and coaches why
 - **Ask Pulse**: a built-in coach for nutrition, training and recovery questions. It can change the plan, but only when the change helps progress, and it pushes back on bad habits
+- **Exercise guides**: every exercise has a captioned video, an animated stick-figure demo that works offline and a written step list. If a video is removed, blocked or slow, Pulse drops to the animation and steps by itself. Open `#/videocheck` to test every video link from your own browser
+- **Set timing**: tap Start and Done on every set; Pulse keeps each set's time and rest, flags sessions that look rushed and shows a day-by-day log in Progress
+- **I ate something else**: type any food (or its macros) to see calories and macros, a good / fine / avoid verdict with the reason, and the nutrients it gives. It is logged and tracked so repeats are noticed
+- **Friends**: students share an 8-character code, the other accepts, and each sees the other's streak, sessions, 14-day strip, best lifts and weight trend. Opt-in, pausable, never shows food or body weight
 - **Coach tab (students)**: which coaches can see them, a preview of exactly what they see, and what stays private
 - **School results**: students search school events. Public events (inter-house, sports day) show winners and house points to anyone. Personal events (a functional fitness test with bronze, silver and gold pins) need the student's name, school ID and date of birth, plus an access code if the school uses one. Coaches publish results in the **Results** tab from a CSV and the school's own pin criteria
 - **Coach dashboard**: every student at the school who plays a sport the coach coaches, with flags, weigh-in trends, habits and a queue of doctors' notes to verify. Multi-sport athletes are visible to each of their sports' coaches
@@ -36,6 +40,10 @@ js/app.js        state, router, onboarding and the core views
 js/fuel.js       Fuel tab: water, meal plan, food guard, supplements
 js/auth.js       welcome, sign up, log in, sync
 js/coach.js      weigh-ins, plan adjustment, Coach tab, coach dashboard
+js/friends.js    friend codes, requests, friends' consistency view
+js/timing.js     per-set timing log
+js/foodcheck.js  off-plan food check and verdicts
+js/demo.js       animated exercise demos
 js/ask.js        Ask Pulse chatbot
 js/results.js    school events, encrypted personal results, pins
 js/landing.js    the "What is Pulse?" page
@@ -72,6 +80,6 @@ Honest limit: the id is guessable by someone who knows a classmate's name, ID an
 
 ## Privacy
 
-Coaches see sessions completed, weigh-in trends, water, protein and readiness as percentages, flags, and supplement requests with the doctor's note. They do not see food logs, meal plans, exercises, injury notes, glass photos or Ask Pulse chats.
+Coaches see sessions (exercises, weights, per-set times), weigh-in trends, the last 7 days of food with off-plan items and how Pulse rated them, allergies, injuries and diet, water, protein and readiness, flags, and supplement requests with the doctor's note. They do not see glass photos or Ask Pulse chats. Friends only see consistency and progress, never food or body weight. Because students can be under 18, the app tells them exactly what is shared on the Coach tab, and your school should confirm this is acceptable under its own policy.
 
 Pulse gives general guidance, not medical advice.

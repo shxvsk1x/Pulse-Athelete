@@ -3,7 +3,7 @@
    ========================================================= */
 
 const LS = 'pulse.v3', LS_DRAFT = 'pulse.draft', LS_PREFS = 'pulse.prefs', LS_THEME = 'pulse.theme';
-const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'results', 'profile'];
+const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'results', 'profile'];
 const LANDING_SECTIONS = ['method', 'product', 'block', 'science', 'faq'];
 const VIEW_META = {
   today: { t: 'Today', ic: 'today' },
@@ -13,6 +13,7 @@ const VIEW_META = {
   progress: { t: 'Progress', ic: 'progress' },
   ask: { t: 'Ask Pulse', ic: 'chat' },
   coach: { t: 'Coach', ic: 'coach' },
+  friends: { t: 'Friends', ic: 'coach' },
   results: { t: 'Results', ic: 'medal' },
   profile: { t: 'Profile', ic: 'profile' }
 };
@@ -99,10 +100,10 @@ function toggleTheme() { setTheme(isDark() ? 'light' : 'dark'); }
 /* ---------- derived data ---------- */
 const hasPlan = () => !!(S && S.profile);
 function blockIdx(d = new Date()) { return ((blockWeek(d) % 4) + 4) % 4; }
-function blockStart(d = new Date()) { return addDays(mondayOf(d), -7 * blockIdx(d)); }
+function blockStart(d = new Date()) { return addDays(startOf(S.profile), 7 * (blockWeek(d) - blockIdx(d))); }
 function weekDone(monday) { const a = iso(monday), b = iso(addDays(monday, 7)); return S.log.sessions.filter(s => s.date >= a && s.date < b).length; }
 function weekStreak() {
-  const planned = trainingDays(S.profile).length, mon = mondayOf(new Date());
+  const planned = trainingDays(S.profile).length, mon = weekStart(new Date());
   let n = weekDone(mon) >= planned ? 1 : 0;
   for (let k = 1; k < 52; k++) { if (weekDone(addDays(mon, -7 * k)) >= planned) n++; else break; }
   return n;
@@ -113,7 +114,7 @@ function nextSessionFrom(d, inclusive = false) {
 }
 const loggedOn = ds => S.log.sessions.filter(s => s.date === ds);
 function weekLoads(n = 8) {
-  const out = [], mon0 = mondayOf(new Date());
+  const out = [], mon0 = weekStart(new Date());
   for (let k = n - 1; k >= 0; k--) {
     const mon = addDays(mon0, -7 * k), a = iso(mon), b = iso(addDays(mon, 7));
     const ss = S.log.sessions.filter(s => s.date >= a && s.date < b);
@@ -167,7 +168,7 @@ const MILESTONES = [
   ['five', 'Five down', 'Five sessions logged', st => st.log.sessions.length >= 5],
   ['ten', 'Double digits', 'Ten sessions logged', st => st.log.sessions.length >= 10],
   ['quarter', 'Twenty-five', '25 sessions. A real habit.', st => st.log.sessions.length >= 25],
-  ['week', 'Full week', 'Every planned session in a week', st => weekDone(mondayOf(new Date())) >= trainingDays(st.profile).length],
+  ['week', 'Full week', 'Every planned session in a week', st => weekDone(weekStart(new Date())) >= trainingDays(st.profile).length],
   ['streak', 'Three in a row', 'Three full weeks back to back', () => weekStreak() >= 3],
   ['hydrated', 'Hydrated', 'Hit your water target in a day', st => waterMl(today()) >= targets(st.profile, !!sessionFor(new Date())).water],
   ['protein', 'Protein on point', 'Hit your protein target in a day', st => sumFoods(st.log.food[today()] || []).p >= targets(st.profile).protein],
@@ -204,6 +205,7 @@ function route() {
   if (Cloud.user && Cloud.user.role === 'coach' && path !== 'about' && !LANDING_SECTIONS.includes(path)) { leaveSample(); return showCoachApp(path); }
   if (path === 'sample') { stopRest(); S = sampleState(); setSampleFlag(true); UI.planWeek = UI.planDay = null; UI.screen = null; history.replaceState(null, '', '#/today'); return showApp('today'); }
   if (path === 'start') { leaveSample(); if (!entered()) return showWelcome(); return showOnboarding(); }
+  if (path === 'videocheck') return showVideoCheck();
   if (APP_VIEWS.includes(path)) {
     if (!hasPlan() && sampleFlag()) S = sampleState();
     if (!hasPlan()) { S = REAL; }
@@ -410,11 +412,11 @@ function finishOnboarding() {
   const profile = { name: String(d.name).trim(), age: +d.age, sex: d.sex, height: +d.height, weight: +d.weight, climate: d.climate, goal: d.goal, extra: d.extra.filter(x => x !== d.goal).slice(0, 2), sports: d.sports.slice(0, 3), exp: d.exp, sessions: +d.sessions, minutes: +d.minutes, days: d.days.slice().sort((a, b) => a - b), where: d.where, gear: d.where === 'none' ? [] : (d.gear || []).slice(), equip: [], school: d.school || '', grade: d.grade || '', diet: d.diet, allergies: String(d.allergies).trim(), injuries: String(d.injuries).trim() };
   const rebuilding = UI.rebuilding && REAL && REAL.profile;
   if (rebuilding) {
-    profile.createdAt = REAL.profile.createdAt;
+    profile.createdAt = REAL.profile.createdAt; profile.startDate = REAL.profile.startDate || iso(new Date(REAL.profile.createdAt));
     S = REAL; S.profile = profile; S.swaps = {}; S.active = null;
     if (+profile.weight !== (S.log.weight[S.log.weight.length - 1] || {}).kg) upsertWeight(today(), +profile.weight);
   } else {
-    profile.createdAt = Date.now();
+    profile.createdAt = Date.now(); profile.startDate = today();
     S = freshState(profile);
   }
   if (rebuilding) { profile.kcalAdj = REAL.profile.kcalAdj || 0; profile.rpeAdj = REAL.profile.rpeAdj || 0; }
@@ -498,7 +500,7 @@ function showApp(view) {
 }
 function sideBlock() {
   const i = blockIdx(), ph = PHASES[i], bs = blockStart();
-  const planned = trainingDays(S.profile).length, done = weekDone(mondayOf(new Date()));
+  const planned = trainingDays(S.profile).length, done = weekDone(weekStart(new Date()));
   return `<div class="row"><span class="label">Week ${i + 1} of 4</span><span class="label ink">${done}/${planned}</span></div>
     <div class="mini-phase">${[0, 1, 2, 3].map(k => `<i class="${k < i ? 'past' : k === i ? 'on' : ''}"></i>`).join('')}</div>
     <b>${ph.n}</b> <span class="muted" style="font-size:13px">· ${ph.d}</span>
@@ -602,19 +604,19 @@ function fuelMiniCard() {
 }
 function weekStrip(mon, opts = {}) {
   const days = trainingDays(S.profile), ds0 = today();
-  return `<div class="week">${DAYS.map((d, i) => {
-    const dt = addDays(mon, i), ds = iso(dt), planned = days.includes(i), done = loggedOn(ds).length > 0;
+  return `<div class="week">${[0, 1, 2, 3, 4, 5, 6].map(i => {
+    const dt = addDays(mon, i), ds = iso(dt), w = wd(dt), planned = days.includes(w), done = loggedOn(ds).length > 0;
     const st = done ? 'done' : planned ? (ds < ds0 ? 'missed' : '') : 'rest';
     const sess = opts.labels && planned ? sessionFor(dt) : null;
     const tag = opts.act ? 'button' : 'div';
-    return `<${tag} class="wday ${st} ${ds === ds0 ? 'today' : ''} ${opts.sel === i ? 'sel' : ''}" ${opts.act ? `type="button" data-act="${opts.act}" data-i="${i}" aria-pressed="${opts.sel === i}"` : ''} aria-label="${DAYS_L[i]} ${fmtDate(dt)}: ${done ? 'done' : planned ? 'training' : 'rest'}">
-      <span class="d">${d}</span><span class="n">${dt.getDate()}</span><span class="st">${done ? IC.check : ''}</span>${opts.labels ? `<span class="lbl">${sess ? esc(sess.name) : 'Rest'}</span>` : ''}</${tag}>`;
+    return `<${tag} class="wday ${st} ${ds === ds0 ? 'today' : ''} ${opts.sel === i ? 'sel' : ''}" ${opts.act ? `type="button" data-act="${opts.act}" data-i="${i}" aria-pressed="${opts.sel === i}"` : ''} aria-label="${DAYS_L[w]} ${fmtDate(dt)}: ${done ? 'done' : planned ? 'training' : 'rest'}">
+      <span class="d">${DAYS[w]}</span><span class="n">${dt.getDate()}</span><span class="st">${done ? IC.check : ''}</span>${opts.labels ? `<span class="lbl">${sess ? esc(sess.name) : 'Rest'}</span>` : ''}</${tag}>`;
   }).join('')}</div>`;
 }
 function weekCard() {
-  const planned = trainingDays(S.profile).length, done = weekDone(mondayOf(new Date())), st = weekStreak();
+  const planned = trainingDays(S.profile).length, done = weekDone(weekStart(new Date())), st = weekStreak();
   return `<div class="card-h"><h3>This week</h3><span class="pill ${done >= planned ? 'acc' : ''}">${done}/${planned} sessions</span></div>
-    <div class="card-b">${weekStrip(mondayOf(new Date()))}
+    <div class="card-b">${weekStrip(weekStart(new Date()))}
       <p class="muted" style="font-size:12.5px;margin-top:14px">${st > 1 ? `${st}-week streak of full weeks. Keep it going.` : done >= planned ? 'Every planned session done this week.' : `${plural(planned - done, 'session')} to go. Missed days do not carry over.`}</p></div>`;
 }
 
@@ -625,14 +627,14 @@ const RAMP = [['Raise', 'Easy jog, skips or bike', '2 min'], ['Activate', 'Glute
 VIEWS.plan = () => {
   const now = new Date(), cur = blockIdx(now), bs = blockStart(now);
   if (UI.planWeek == null) UI.planWeek = cur;
-  if (UI.planDay == null) UI.planDay = wd(now);
+  if (UI.planDay == null) UI.planDay = clamp(dayDiff(addDays(bs, 7 * UI.planWeek), now), 0, 6);
   const mon = addDays(bs, 7 * UI.planWeek), date = addDays(mon, UI.planDay), ds = iso(date), sess = sessionFor(date), done = loggedOn(ds)[0];
   const isToday = ds === today();
   return `<div class="ph"><div><div class="label">Four-week block · ${fmtDate(bs)} – ${fmtDate(addDays(bs, 27))}</div><h2 style="margin-top:8px">Your <em>plan.</em></h2>
     <p>${S.profile.sessions} sessions a week · ${GOALS[S.profile.goal].label.toLowerCase()}${S.profile.sports.length ? ' · ' + S.profile.sports.map(s => SPORTS[s].split(' (')[0].toLowerCase()).join(' and ') : ''}</p></div>
     <div class="ph-actions"><button class="btn btn-ghost btn-sm" data-act="plan-today">Jump to today</button><a class="btn btn-quiet btn-sm" href="#/start">${IC.edit}Edit inputs</a></div></div>
     <div class="block-strip" role="tablist" aria-label="Weeks in this block">${PHASES.map((ph, i) => {
-      const m = addDays(bs, 7 * i), pct = i < cur ? 100 : i === cur ? (wd(now) + 1) / 7 * 100 : 0;
+      const m = addDays(bs, 7 * i), pct = i < cur ? 100 : i === cur ? (dayDiff(m, now) + 1) / 7 * 100 : 0;
       return `<button class="bk ${i === cur ? 'now' : ''}" role="tab" aria-selected="${UI.planWeek === i}" data-act="plan-week" data-i="${i}"><span class="label"><span>Week ${i + 1}</span></span><b>${ph.n}</b><span class="d">${fmtDate(m)} – ${fmtDate(addDays(m, 6))}</span><span class="meter" style="width:${pct}%"></span></button>`;
     }).join('')}</div>
     <div style="margin-bottom:16px">${weekStrip(mon, { labels: true, act: 'plan-day', sel: UI.planDay })}</div>
@@ -697,12 +699,13 @@ function liveSession() {
     <div class="live-head"><div><div class="label" style="display:flex;gap:8px;align-items:center"><span class="dot live"></span>Live · ${sess.phase.n} week${a.from !== a.date ? ' · from ' + DAYS[wd(parseIso(a.from))] : ''}</div><h3 style="margin-top:6px">${esc(sess.name)}</h3></div>
       <div style="text-align:right"><div class="clock" id="clock" aria-label="Elapsed time">${hms((Date.now() - a.start) / 1000)}</div><div class="label" style="margin-top:6px" id="sets-lbl">${dn} / ${tot} sets</div></div></div>
     <div class="live-progress" role="progressbar" aria-label="Sets completed" aria-valuemin="0" aria-valuemax="${tot}" aria-valuenow="${dn}"><i id="live-bar" style="width:${tot ? dn / tot * 100 : 0}%"></i></div>
+    ${runStrip()}
     <div class="live-water">${IC.drop}<span>Sip water between sets: 150–250 ml every 15–20 minutes.</span><button class="btn btn-quiet btn-sm" data-act="drink" data-ml="200">${IC.plus}Log 200 ml</button></div>
     ${sess.exs.map(e => {
       const arr = a.sets[e.key] || [], complete = arr.filter(Boolean).length >= e.sets, last = lastKg(e.n), kg = a.kg[e.n] ?? last ?? '';
       return `<div class="lx ${complete ? 'complete' : ''}" data-lx="${esc(e.key)}">
         <div class="lx-top">${formThumb(e.n, 'sm')}<div style="min-width:0"><h5><span class="tickc">${IC.check}</span>${esc(e.n)}</h5><p>${e.sets} × ${e.reps} · rest ${restTxt(e.rest)} · RPE ${e.rpe} · ${esc(e.cue)}</p></div></div>
-        <div class="lx-row"><div class="sets" role="group" aria-label="Sets for ${esc(e.n)}">${Array.from({ length: e.sets }, (_, j) => `<button class="set" data-act="set" data-key="${esc(e.key)}" data-j="${j}" aria-pressed="${!!arr[j]}" aria-label="Set ${j + 1} of ${e.sets}">${arr[j] ? IC.check.replace('<svg', '<svg width="15" height="15"') : `Set ${j + 1}`}</button>`).join('')}</div>
+        <div class="lx-row"><div class="sets" role="group" aria-label="Sets for ${esc(e.n)}">${Array.from({ length: e.sets }, (_, j) => setBtn(e, j, arr[j], a)).join('')}</div>
         ${isLoaded(e) ? `<div class="kg"><button data-act="kg" data-n="${esc(e.n)}" data-v="-2.5" aria-label="Decrease weight">${IC.minus}</button><input type="number" inputmode="decimal" step="0.5" min="0" data-kg="${esc(e.n)}" value="${kg}" placeholder="0" aria-label="Weight in kilograms for ${esc(e.n)}"><span class="u">kg</span><button data-act="kg" data-n="${esc(e.n)}" data-v="2.5" aria-label="Increase weight">${IC.plus}</button></div>` : ''}</div>
         ${last ? `<div class="last" style="margin-top:10px">Last time: ${fmt1(last)} kg</div>` : ''}</div>`;
     }).join('')}
@@ -712,13 +715,13 @@ function liveSession() {
 }
 function startClock() {
   clearInterval(clockTimer);
-  clockTimer = setInterval(() => { const c = $('#clock'); if (!c || !S.active) return clearInterval(clockTimer); c.textContent = hms((Date.now() - S.active.start) / 1000); }, 1000);
+  clockTimer = setInterval(() => { const c = $('#clock'); if (!c || !S.active) return clearInterval(clockTimer); c.textContent = hms((Date.now() - S.active.start) / 1000); tickRunClock(); }, 1000);
 }
 function startSession(fromDate) {
   if (S.active) { navigate('session'); return; }
   primeAudio();
   const from = fromDate || today();
-  S.active = { date: today(), from, start: Date.now(), sets: {}, kg: {} };
+  S.active = { date: today(), from, start: Date.now(), sets: {}, kg: {}, t: {}, run: null };
   save();
   if (UI.view === 'session') refresh(); else navigate('session');
   toast('Session started. Tap a set when you finish it.', { icon: IC.play });
@@ -729,20 +732,49 @@ function updateLiveCounters() {
   const b = $('#live-bar'); if (b) { b.style.width = (dn / tot * 100) + '%'; b.parentElement.setAttribute('aria-valuenow', dn); }
   const l = $('#sets-lbl'); if (l) l.textContent = `${dn} / ${tot} sets`;
 }
-function toggleSet(key, j, btn) {
+/* ---------- set timing: tap a set to start its clock, tap it again when it is finished ---------- */
+const setSecs = (st, key, j) => { const t = st.t && st.t[key] && st.t[key][j]; return t ? t.sec : null; };
+function setBtn(e, j, done, a) {
+  const run = a.run && a.run.key === e.key && a.run.j === j, sec = setSecs(a, e.key, j);
+  const lab = run ? `Finish set ${j + 1} of ${e.sets}. Timer running.` : done ? `Set ${j + 1} of ${e.sets} done in ${sec != null ? sec + ' seconds' : 'an untimed set'}. Tap to undo.` : `Start set ${j + 1} of ${e.sets}`;
+  const inner = run ? `<span class="s-n">Set ${j + 1}</span><span class="s-t" data-runclock>${mmss((Date.now() - a.run.s) / 1000)}</span>`
+    : done ? `<span class="s-n">${IC.check.replace('<svg', '<svg width="13" height="13"')}</span><span class="s-t">${sec != null ? sec + ' s' : ''}</span>` : `<span class="s-n">Set ${j + 1}</span><span class="s-t">Start</span>`;
+  return `<button class="set ${run ? 'run' : ''}" data-act="set" data-key="${esc(e.key)}" data-j="${j}" aria-pressed="${!!done}" aria-label="${lab}">${inner}</button>`;
+}
+function runStrip() {
+  const a = S.active; if (!a || !a.run) return `<div class="run-strip" id="run-strip" hidden></div>`;
+  const sess = activeSession(), e = sess && sess.exs.find(x => x.key === a.run.key); if (!e) return `<div class="run-strip" id="run-strip" hidden></div>`;
+  return `<div class="run-strip" id="run-strip" role="timer" aria-live="off"><span class="dot live"></span><div style="min-width:0"><b>${esc(e.n)} · set ${a.run.j + 1}</b><span>Timing your set. Tap Done the moment you finish.</span></div><span class="rs-t" id="rs-t">${mmss((Date.now() - a.run.s) / 1000)}</span><button type="button" class="btn btn-primary btn-sm" data-act="set-done">${IC.check.replace('<svg', '<svg width="14" height="14"')}Done</button><button type="button" class="btn btn-quiet btn-sm" data-act="set-cancel">Cancel</button></div>`;
+}
+function tickRunClock() {
+  const a = S && S.active; if (!a || !a.run) return;
+  const t = mmss((Date.now() - a.run.s) / 1000);
+  const r = $('#rs-t'); if (r) r.textContent = t;
+  $$('[data-runclock]').forEach(x => x.textContent = t);
+}
+function toggleSet(key, j) {
   const sess = activeSession(); if (!sess) return;
   const e = sess.exs.find(x => x.key === key); if (!e) return;
-  const arr = S.active.sets[key] || (S.active.sets[key] = Array(e.sets).fill(false));
-  arr[j] = !arr[j];
+  const a = S.active, arr = a.sets[key] || (a.sets[key] = Array(e.sets).fill(false));
+  a.t = a.t || {};
+  const T = a.t[key] || (a.t[key] = []);
+  const running = a.run && a.run.key === key && a.run.j === j;
+  if (arr[j]) {                                  // undo a finished set
+    arr[j] = false; delete T[j]; stopRest();
+  } else if (running) {                          // finish the set being timed
+    const end = Date.now(), sec = Math.max(1, Math.round((end - a.run.s) / 1000));
+    T[j] = { s: a.run.s, e: end, sec }; arr[j] = true; a.run = null;
+    if (navigator.vibrate) navigator.vibrate(12);
+  } else {                                       // start timing this set
+    if (a.run) { const other = sess.exs.find(x => x.key === a.run.key); toast(`Finish <b>${esc(other ? other.n : 'the set')} · set ${a.run.j + 1}</b> first, or cancel it.`, { type: 'err' }); return; }
+    stopRest(); a.run = { key, j, s: Date.now() };
+    if (navigator.vibrate) navigator.vibrate(8);
+  }
   save();
-  btn.setAttribute('aria-pressed', arr[j]);
-  btn.innerHTML = arr[j] ? IC.check.replace('<svg', '<svg width="15" height="15"') : `Set ${j + 1}`;
-  if (arr[j]) { btn.classList.remove('just'); void btn.offsetWidth; btn.classList.add('just'); if (navigator.vibrate) navigator.vibrate(12); }
-  const lx = btn.closest('.lx'), complete = arr.filter(Boolean).length >= e.sets;
-  lx.classList.toggle('complete', complete);
-  updateLiveCounters();
-  const tot = sess.exs.reduce((t, x) => t + x.sets, 0);
-  if (arr[j]) {
+  const y = scrollY; refresh(); window.scrollTo(0, y);
+  if (arr[j] && T[j]) {
+    const complete = arr.filter(Boolean).length >= e.sets, tot = sess.exs.reduce((t, x) => t + x.sets, 0);
+    const btn = $(`.set[data-key="${CSS.escape(key)}"][data-j="${j}"]`); if (btn) { btn.classList.add('just'); }
     if (setsDone() >= tot) { stopRest(); toast('<b>Every set done.</b> Finish the session to log it.', { action: { label: 'Finish', fn: finishSession } }); }
     else startRest(complete ? Math.min(e.rest, 90) : e.rest, complete ? 'Next exercise' : `${e.n} · set ${arr.filter(Boolean).length + 1}`);
   }
@@ -778,6 +810,7 @@ function stopRest() {
 const RPE_TXT = { 1: 'Barely anything. Could do this all day.', 2: 'Very easy. Chatting the whole time.', 3: 'Easy. Breathing a little harder.', 4: 'Comfortable. Light sweat.', 5: 'Moderate. Working, with plenty left.', 6: 'Somewhat hard. Three or four reps left in the tank.', 7: 'Hard. Two or three reps left in the tank.', 8: 'Very hard. One or two reps left.', 9: 'Near max. Maybe one more rep.', 10: 'Maximal. Nothing left at all.' };
 function finishSession() {
   const sess = activeSession(); if (!sess) return;
+  if (S.active.run) { toast('A set is still being timed. Tap <b>Done</b> to finish it, or <b>Cancel</b>.', { type: 'err' }); return; }
   const tot = sess.exs.reduce((t, e) => t + e.sets, 0), dn = setsDone();
   if (!dn) { toast('Tick off at least one set before finishing, or discard the session.', { type: 'err' }); return; }
   const ask = () => {
@@ -802,7 +835,7 @@ function logSession(rpe) {
   sess.exs.forEach(e => { const v = +a.kg[e.n]; if (v > 0 && (a.sets[e.key] || []).some(Boolean)) kg[e.n] = v; });
   const prevBest = Object.fromEntries(bests());
   const pbs = Object.entries(kg).filter(([n, v]) => !prevBest[n] || v > prevBest[n].kg).map(([n, v]) => ({ n, v, prev: prevBest[n] ? prevBest[n].kg : null }));
-  const entry = { id: 's' + Date.now().toString(36), date: a.date, from: a.from, tKey: sess.tKey, name: sess.name, rpe, mins, load: Math.round(rpe * mins), done: dn, total: tot, kg };
+  const entry = { id: 's' + Date.now().toString(36), date: a.date, from: a.from, tKey: sess.tKey, name: sess.name, rpe, mins, load: Math.round(rpe * mins), done: dn, total: tot, kg, setLog: buildSetLog(sess, a) };
   S.log.sessions.push(entry);
   S.log.sessions.sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : 0);
   S.active = null;
@@ -813,7 +846,7 @@ function logSession(rpe) {
   checkMilestones();
 }
 function doneScreen({ entry, pbs }) {
-  const planned = trainingDays(S.profile).length, wk = weekDone(mondayOf(new Date())), r = acwr();
+  const planned = trainingDays(S.profile).length, wk = weekDone(weekStart(new Date())), r = acwr();
   return `<div class="card raised"><div class="done-hero">
       <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
       <h2>Session logged.</h2><p>${esc(entry.name)} · ${fmtDate(parseIso(entry.date))}${entry.done < entry.total ? ` · ${entry.done} of ${entry.total} sets` : ' · every set done'}</p></div>
@@ -879,6 +912,7 @@ VIEWS.progress = () => {
       <section class="card c-7"><div class="card-h"><h3>History</h3>${seg2('hist', [['all', 'All'], ['block', 'This block']], UI.histFilter)}</div>
         <div class="card-b">${hist.length ? `<ul class="hist">${hist.slice(0, 12).map(s => { const d = parseIso(s.date); return `<li><div class="dte"><b>${d.getDate()}</b><span>${d.toLocaleDateString('en', { month: 'short' })}</span></div><div style="min-width:0"><div class="nm">${esc(s.name)}</div><div class="sub">${DAYS[wd(d)]} · ${s.mins} min · ${s.done}/${s.total} sets · RPE ${s.rpe}</div></div><span class="ld">${fmtN(s.load)} AU</span><button class="icon-btn sm" data-act="hist-del" data-id="${esc(s.id || s.date)}" aria-label="Delete ${esc(s.name)} on ${fmtDate(d)}">${IC.trash}</button></li>`; }).join('')}</ul>${hist.length > 12 ? `<p class="muted" style="font-size:12.5px;margin-top:12px">Showing the latest 12 of ${hist.length}. Export your data from Profile for the full record.</p>` : ''}`
           : `<div class="empty" style="padding:24px 8px"><h4 style="font-size:15px">Nothing here yet</h4><p style="font-size:13.5px">${UI.histFilter === 'block' ? 'No sessions logged in this block yet.' : 'Logged sessions will appear here.'}</p></div>`}</div></section>
+      ${timingCard()}
       <section class="card c-12"><div class="card-h"><h3>Milestones</h3><span class="pill ${Object.keys(got).length ? 'acc' : ''}">${MILESTONES.filter(m => got[m[0]]).length} of ${MILESTONES.length}</span></div>
         <div class="card-b"><div class="badges">${MILESTONES.map(([id, t, d]) => `<div class="medal ${got[id] ? 'got' : ''}"><span class="m">${got[id] ? IC.medal : IC.lock}</span><b>${esc(t)}</b>${got[id] ? 'Earned ' + fmtDate(parseIso(got[id])) : esc(d)}</div>`).join('')}</div></div></section>
     </div>`;
@@ -984,8 +1018,8 @@ const ACT = {
   /* plan */
   'plan-week': el => { UI.planWeek = +el.dataset.i; refresh(); },
   'plan-day': el => { UI.planDay = +el.dataset.i; refresh(); },
-  'plan-today': () => { UI.planWeek = blockIdx(); UI.planDay = wd(new Date()); refresh(); },
-  'plan-goto': el => { const d = parseIso(el.dataset.d), bs = blockStart(); const w = Math.floor((mondayOf(d) - bs) / (7 * 864e5)); if (w > 3) { toast('That session is in your next block.'); return; } UI.planWeek = w; UI.planDay = wd(d); refresh(); },
+  'plan-today': () => { UI.planWeek = blockIdx(); UI.planDay = clamp(dayDiff(addDays(blockStart(), 7 * UI.planWeek), new Date()), 0, 6); refresh(); },
+  'plan-goto': el => { const d = parseIso(el.dataset.d), bs = blockStart(); const w = Math.floor(dayDiff(bs, d) / 7); if (w > 3 || w < 0) { toast('That session is in your next block.'); return; } UI.planWeek = w; UI.planDay = dayDiff(addDays(bs, 7 * w), d); refresh(); },
   swap: el => {
     const key = el.dataset.key, from = el.dataset.n;
     S.swaps[key] = (S.swaps[key] || 0) + 1; save();
@@ -995,7 +1029,9 @@ const ACT = {
   },
 
   /* session */
-  set: el => toggleSet(el.dataset.key, +el.dataset.j, el),
+  set: el => toggleSet(el.dataset.key, +el.dataset.j),
+  'set-done': () => { const r = S.active && S.active.run; if (r) toggleSet(r.key, r.j); },
+  'set-cancel': () => { if (!S.active || !S.active.run) return; S.active.run = null; save(); const y = scrollY; refresh(); window.scrollTo(0, y); toast('Set timing cancelled.'); },
   kg: el => { const n = el.dataset.n, inp = el.parentElement.querySelector('input'); const v = Math.max(0, (+inp.value || 0) + +el.dataset.v); inp.value = v; S.active.kg[n] = v; save(); },
   finish: () => finishSession(),
   discard: () => confirmModal({ title: 'Discard this session?', sub: 'The sets you ticked will not be saved. This cannot be undone.', confirm: 'Discard session', danger: true, onConfirm: () => { S.active = null; stopRest(); save(); refresh(); toast('Session discarded.'); } }),
@@ -1030,7 +1066,7 @@ const ACT = {
 
   /* profile */
   'reset-swaps': () => { const old = S.swaps; S.swaps = {}; save(); refresh(); toast('Exercise swaps reset to the original plan.', { action: { label: 'Undo', fn: () => { S.swaps = old; save(); refresh(); } } }); },
-  'restart-block': () => confirmModal({ title: 'Restart your block?', sub: 'Your plan goes back to Base week starting this Monday. Logged sessions and food stay as they are.', confirm: 'Restart block', onConfirm: () => { S.profile.createdAt = mondayOf(new Date()).getTime(); UI.planWeek = UI.planDay = null; save(); refresh(); $('#pg-crumb').textContent = `· Week 1 of 4 · Base`; toast('Block restarted. This is Base week.'); } }),
+  'restart-block': () => confirmModal({ title: 'Restart your block?', sub: 'Your plan goes back to Base week, starting today. Logged sessions and food stay as they are.', confirm: 'Restart block', onConfirm: () => { S.profile.createdAt = Date.now(); S.profile.startDate = today(); UI.planWeek = UI.planDay = null; save(); refresh(); $('#pg-crumb').textContent = `· Week 1 of 4 · Base`; toast('Block restarted. This is Base week.'); } }),
   export: () => {
     const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `pulse-${(S.profile.name || 'athlete').toLowerCase()}-${today()}.json`;
