@@ -20,7 +20,7 @@ Training and fuel planning for student athletes. Tell Pulse your sport, schedule
 - **I ate something else**: type any food (or its macros) to see calories and macros, a good / fine / avoid verdict with the reason, and the nutrients it gives. It is logged and tracked so repeats are noticed
 - **Friends**: students share an 8-character code, the other accepts, and each sees the other's streak, sessions, 14-day strip, best lifts and weight trend. Opt-in, pausable, never shows food or body weight
 - **Coach tab (students)**: which coaches can see them, a preview of exactly what they see, and what stays private
-- **School results**: students search school events. Public events (inter-house, sports day) show winners and house points to anyone. Personal events (a functional fitness test with bronze, silver and gold pins) need the student's name, school ID and date of birth, plus an access code if the school uses one. Coaches publish results in the **Results** tab from a CSV and the school's own pin criteria
+- **School results**: students search school events. Public events (inter-house, sports day) show winners and house points to anyone. Personal events (a functional fitness test with bronze, silver and gold pins) can be seen two ways: log in with student ID and password (the student creates it once by verifying the email on the school's list; we send a verification email), or look up with name, school ID and date of birth. Coaches publish results in the **Results** tab from a CSV and the school's own pin criteria
 - **Coach dashboard**: every student at the school who plays a sport the coach coaches, with flags, weigh-in trends, habits and a queue of doctors' notes to verify. Multi-sport athletes are visible to each of their sports' coaches
 
 ## Tech
@@ -72,11 +72,11 @@ To add another school, add it to `schools` in `js/config.js` and create a matchi
 Coaches: **Results** tab, **Add an event**.
 
 - **Public** (inter-house, sports day): CSV with `category,place,name` and optional `house,result`. House points (5, 3, 1) are added up for you.
-- **Personal** (fitness test): write the criteria one test per line as `Test | unit | higher or lower | bronze | silver | gold` (each number is the minimum for that pin), then a CSV with `name,id,dob` (YYYY-MM-DD), one column per test, and an optional `note`. Choose whether the overall pin is the lowest or the average level, and let Pulse generate an access code per student. Download the codes straight away; they are not stored.
+- **Personal** (fitness test): write the criteria one test per line as `Test | unit | higher or lower | bronze | silver | gold` (each number is the minimum for that pin), then a CSV with `name,id,dob,email` (dob as YYYY-MM-DD; email is the student's school email, needed for the student ID login), one column per test, and an optional `note`. Choose whether the overall pin is the lowest or the average level, and let Pulse generate an access code per student. Download the codes straight away; they are not stored.
 
-How personal results are protected: the browser turns name + ID + date of birth (+ code) into a lookup id and an encryption key (PBKDF2-SHA512, 150,000 rounds). Only the encrypted result is stored, under that id. The rules in `firestore.rules` let a signed-in student fetch one document by id but never list the collection, and coaches can only see encrypted data. The browser also slows repeated wrong tries.
+How personal results are protected: the browser turns name + ID + date of birth into a lookup id and an encryption key (PBKDF2-SHA512, 150,000 rounds). Only the encrypted result is stored, under that id. The rules in `firestore.rules` let a signed-in student fetch one document by id but never list the collection, and coaches can only see encrypted data. The browser also slows repeated wrong tries.
 
-Honest limit: the id is guessable by someone who knows a classmate's name, ID and birthday, so **use access codes**. After changing `firestore.rules`, publish them again in the Firebase console. For stronger protection add Firebase App Check or a Cloud Function that rate-limits lookups.
+Honest limits: the name, ID and date of birth lookup can be guessed by someone who knows a classmate's details, so prefer the student ID login (add the `email` column). A student ID login stores the verified email in a lookup that anyone who knows the exact ID can fetch, so treat IDs as semi-private. If a student needs their ID login reset, delete their document in Firestore under `resultLogins`. After changing `firestore.rules`, publish them again in the Firebase console.
 
 ## Privacy
 

@@ -94,6 +94,26 @@ service cloud.firestore {
     // personal results, stored encrypted. The document id is derived from the student's name, ID and date of birth
     // (and access code), so a student can fetch only their own by knowing it. Nobody can list the collection except
     // the school's coaches, who can see only encrypted data.
+    // results login (student ID + password). A student verifies their email, then registers a lookup so the ID can be typed in place of the email.
+    // The lookup holds only the email the ID belongs to; anyone may fetch one by its exact ID, nobody may list them.
+    match /resultLogins/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn() && request.auth.token.email_verified == true
+        && request.resource.data.uid == request.auth.uid && request.resource.data.email == request.auth.token.email;
+      allow update: if signedIn() && request.auth.token.email_verified == true && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid && request.resource.data.email == request.auth.token.email;
+      // the owner can remove it, and so can a coach of that school (to free up an ID someone took by mistake)
+      allow delete: if signedIn() && (resource.data.uid == request.auth.uid || (isCoach() && resource.data.school == me().school));
+    }
+    // a student's result for a personal event, readable only by the verified email on the school's list. Coaches manage their school's.
+    match /loginResults/{id} {
+      allow get: if signedIn() && request.auth.token.email_verified == true && resource.data.email == request.auth.token.email;
+      allow list: if isCoach() && resource.data.school == me().school;
+      allow create, update: if isCoach() && request.resource.data.school == me().school;
+      allow delete: if isCoach() && resource.data.school == me().school;
+    }
+
     match /results/{id} {
       allow get: if signedIn();
       allow list: if isCoach() && resource.data.school == me().school;

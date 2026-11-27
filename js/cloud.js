@@ -27,6 +27,9 @@ const Cloud = (() => {
     let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return 'x' + h;
   }
 
+  const normSid = x => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const rkey = (school, sid) => school + '_' + normSid(sid);          // one results login per student ID per school
+  const okEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
   const pairId = (x, y) => x < y ? x + '_' + y : y + '_' + x;
   const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/I so a code is easy to read out
   const newCode = free => { for (let i = 0; i < 20; i++) { let c = ''; const r = crypto.getRandomValues ? crypto.getRandomValues(new Uint8Array(8)) : Array.from({ length: 8 }, () => Math.floor(Math.random() * 256)); for (let k = 0; k < 8; k++) c += CODE_CHARS[r[k] % CODE_CHARS.length]; if (free(c)) return c; } throw err('Could not make a friend code. Try again.'); };
@@ -34,7 +37,7 @@ const Cloud = (() => {
 
   /* ---------------- LOCAL (demo) backend ---------------- */
   const L = {
-    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; d.friends = d.friends || { codes: {}, ships: {}, feed: {} }; return d; },
+    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; d.friends = d.friends || { codes: {}, ships: {}, feed: {} }; d.rlog = d.rlog || { logins: {}, rows: {} }; return d; },
     put(db) { if (!lsSet('pulse.cloud', db)) throw err('This browser is out of storage space.'); },
     async init() { const uid = lsGet('pulse.cloud.session'); const u = uid && L.db().users[uid]; me = u ? L.pub(u) : null; },
     pub(u) { const { hash, ...rest } = u; return rest; },
@@ -72,8 +75,25 @@ const Cloud = (() => {
     async putReview(id, d) { const db = L.db(); db.reviews[id] = Object.assign({}, d, { by: me.uid, byName: me.name, at: Date.now() }); L.put(db); },
     async getReview(id) { return L.db().reviews[id] || null; },
     async eventsList(school) { return Object.values(L.db().events).filter(e => !school || e.school === school).map(e => JSON.parse(e.json)); },
-    async putEvent(ev, rows) { const db = L.db(); db.events[ev.id] = { school: ev.school, json: JSON.stringify(ev) }; rows.forEach(r => db.results[ev.id + '_' + r.tag] = { event: ev.id, school: ev.school, iv: r.iv, c: r.c }); L.put(db); },
-    async deleteEvent(id) { const db = L.db(); delete db.events[id]; Object.keys(db.results).forEach(k => { if (db.results[k].event === id) delete db.results[k]; }); L.put(db); },
+    async putEvent(ev, rows, logins) { const db = L.db(); db.events[ev.id] = { school: ev.school, json: JSON.stringify(ev) }; rows.forEach(r => db.results[ev.id + '_' + r.tag] = { event: ev.id, school: ev.school, iv: r.iv, c: r.c }); (logins || []).forEach(r => db.rlog.rows[ev.id + '_' + r.sid] = { event: ev.id, school: ev.school, email: r.email, rec: r.rec }); L.put(db); },
+    async deleteEvent(id) { const db = L.db(); delete db.events[id]; Object.keys(db.results).forEach(k => { if (db.results[k].event === id) delete db.results[k]; }); Object.keys(db.rlog.rows).forEach(k => { if (db.rlog.rows[k].event === id) delete db.rlog.rows[k]; }); L.put(db); },
+    /* results login: student ID + password, email verified. In demo mode no email can be sent, so verification is simulated. */
+    async resSignUp(school, sid, email, pw) {
+      const db = L.db(), k = rkey(school, sid), em = String(email).trim().toLowerCase();
+      if (db.rlog.logins[k]) throw err('That student ID already has a results login. Log in with it, or ask your PE teacher to reset it.');
+      db.rlog.logins[k] = { email: em, hash: await sha(k + '|' + pw), verified: false }; L.put(db); lsSet('pulse.res.sess', { k, sid: normSid(sid), email: em }); return { email: em, verified: false, demo: true };
+    },
+    async resVerifyNow() { const db = L.db(), s = lsGet('pulse.res.sess'); if (!s || !db.rlog.logins[s.k]) throw err('Start by creating your login.'); db.rlog.logins[s.k].verified = true; L.put(db); return true; },
+    async resSignIn(school, sid, pw) {
+      const db = L.db(), k = rkey(school, sid), a = db.rlog.logins[k];
+      if (!a || a.hash !== await sha(k + '|' + pw)) throw err('That student ID and password do not match. If you have no login yet, create one below.');
+      lsSet('pulse.res.sess', { k, sid: normSid(sid), email: a.email }); return { sid: normSid(sid), email: a.email, verified: !!a.verified };
+    },
+    async resSession() { const s = lsGet('pulse.res.sess'), a = s && L.db().rlog.logins[s.k]; return a ? { sid: s.sid, email: a.email, verified: !!a.verified } : null; },
+    async resResend() { return true; },
+    async resCheck() { const s = await L.resSession(); return !!(s && s.verified); },
+    async resSignOut() { lsDel('pulse.res.sess'); },
+    async resGet(evId, sid) { const db = L.db(), s = lsGet('pulse.res.sess'), a = s && db.rlog.logins[s.k]; if (!a || !a.verified || s.sid !== normSid(sid)) return null; const r = db.rlog.rows[evId + '_' + normSid(sid)]; return r && r.email === a.email ? r.rec : null; },
     async getResult(evId, tag) { return L.db().results[evId + '_' + tag] || null; },
     /* friends */
     async friendCode() {
@@ -173,8 +193,10 @@ const Cloud = (() => {
     async putReview(id, d) { try { await fb.db.doc('reviews/' + id).set(Object.assign({}, d, { by: me.uid, byName: me.name, at: Date.now() })); } catch (e) { throw fbErr(e); } },
     async getReview(id) { const s = await fb.db.doc('reviews/' + id).get(); return s.exists ? s.data() : null; },
     async eventsList(school) { let q = fb.db.collection('events'); if (school) q = q.where('school', '==', school); const snap = await q.get(); return snap.docs.map(d => JSON.parse(d.data().json)); },
-    async putEvent(ev, rows) {
+    async putEvent(ev, rows, logins) {
       try {
+        logins = logins || [];
+        for (let i = 0; i < logins.length; i += 400) { const b = fb.db.batch(); logins.slice(i, i + 400).forEach(r => b.set(fb.db.doc('loginResults/' + ev.id + '_' + r.sid), { event: ev.id, school: ev.school, email: r.email, rec: r.rec })); await b.commit(); }
         for (let i = 0; i < rows.length; i += 400) { const b = fb.db.batch(); rows.slice(i, i + 400).forEach(r => b.set(fb.db.doc('results/' + ev.id + '_' + r.tag), { event: ev.id, school: ev.school, iv: r.iv, c: r.c })); await b.commit(); }
         await fb.db.doc('events/' + ev.id).set({ school: ev.school, kind: ev.kind, title: ev.title, date: ev.date, json: JSON.stringify(ev) });
       } catch (e) { throw fbErr(e); }
@@ -183,10 +205,57 @@ const Cloud = (() => {
       try {
         const q = await fb.db.collection('results').where('school', '==', me.school).where('event', '==', id).get();
         for (let i = 0; i < q.docs.length; i += 400) { const b = fb.db.batch(); q.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
+        const q2 = await fb.db.collection('loginResults').where('school', '==', me.school).where('event', '==', id).get();
+        for (let i = 0; i < q2.docs.length; i += 400) { const b = fb.db.batch(); q2.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
         await fb.db.doc('events/' + id).delete();
       } catch (e) { throw fbErr(e); }
     },
     async getResult(evId, tag) { try { const s = await fb.db.doc('results/' + evId + '_' + tag).get(); return s.exists ? s.data() : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); } },
+    /* results login: a second Firebase app, so signing in here never signs the student out of Pulse */
+    async rapp() {
+      if (!F._r) { const app = firebase.apps.find(a => a.name === 'results') || firebase.initializeApp(cfg.firebase, 'results'); F._r = { auth: app.auth(), db: app.firestore() }; await new Promise(ok => { const off = F._r.auth.onAuthStateChanged(() => { off(); ok(); }); }); }
+      return F._r;
+    },
+    async resRegister(school, sid, user) {
+      await user.getIdToken(true);
+      await F._r.db.doc('resultLogins/' + rkey(school, sid)).set({ uid: user.uid, email: String(user.email).toLowerCase(), sid: normSid(sid), school });
+    },
+    async resSignUp(school, sid, email, pw) {
+      const r = await F.rapp(), em = String(email).trim().toLowerCase();
+      if (!okEmail(em)) throw err('That email address does not look right.');
+      let u;
+      try { u = (await r.auth.createUserWithEmailAndPassword(em, pw)).user; }
+      catch (e) {
+        if (e.code === 'auth/email-already-in-use') {   // maybe their Pulse account: same email and password proves it is theirs
+          try { u = (await r.auth.signInWithEmailAndPassword(em, pw)).user; } catch (x) { throw err('That email already has an account with a different password. Enter the password you use for Pulse, or use a different email.'); }
+        } else throw fbErr(e);
+      }
+      try { const ex = await r.db.doc('resultLogins/' + rkey(school, sid)).get(); if (ex.exists && ex.data().uid !== u.uid) { await r.auth.signOut(); throw err('That student ID already has a results login. Log in with it, or ask your PE teacher to reset it.'); } } catch (e) { if (e.friendly) throw e; }
+      lsSet('pulse.res.sess', { sid: normSid(sid), school, email: em });
+      if (u.emailVerified) { await F.resRegister(school, sid, u); return { email: em, verified: true }; }
+      try { await u.sendEmailVerification({ url: location.origin + location.pathname + '#/results' }); } catch (e) { throw fbErr(e); }
+      return { email: em, verified: false };
+    },
+    async resResend() { const r = await F.rapp(); if (!r.auth.currentUser) throw err('Create your login first.'); try { await r.auth.currentUser.sendEmailVerification({ url: location.origin + location.pathname + '#/results' }); } catch (e) { throw fbErr(e); } return true; },
+    async resCheck() {
+      const r = await F.rapp(), u = r.auth.currentUser, s = lsGet('pulse.res.sess'); if (!u || !s) return false;
+      await u.reload(); if (!u.emailVerified) return false;
+      await F.resRegister(s.school, s.sid, u); return true;
+    },
+    async resSignIn(school, sid, pw) {
+      const r = await F.rapp(); let snap;
+      try { snap = await r.db.doc('resultLogins/' + rkey(school, sid)).get(); } catch (e) { throw fbErr(e); }
+      if (!snap.exists) throw err('No results login for that student ID yet. Create one below.');
+      let u; try { u = (await r.auth.signInWithEmailAndPassword(snap.data().email, pw)).user; } catch (e) { throw err(e.code === 'auth/too-many-requests' ? FBERR['auth/too-many-requests'] : 'That student ID and password do not match.'); }
+      lsSet('pulse.res.sess', { sid: normSid(sid), school, email: u.email });
+      return { sid: normSid(sid), email: u.email, verified: u.emailVerified };
+    },
+    async resSession() { const r = await F.rapp(), u = r.auth.currentUser, s = lsGet('pulse.res.sess'); return u && s ? { sid: s.sid, email: u.email, verified: u.emailVerified } : null; },
+    async resSignOut() { try { const r = await F.rapp(); await r.auth.signOut(); } catch (e) {} lsDel('pulse.res.sess'); },
+    async resGet(evId, sid) {
+      const r = await F.rapp(); if (!r.auth.currentUser) return null;
+      try { const s = await r.db.doc('loginResults/' + evId + '_' + normSid(sid)).get(); return s.exists ? s.data().rec : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); }
+    },
     /* friends */
     async friendCode() {
       if (me.friendCode) return me.friendCode;
@@ -230,8 +299,9 @@ const Cloud = (() => {
     updateProfile: f => B.updateProfile(f), loadState: () => B.loadState(), saveState: s => B.saveState(s),
     publishProgress: d => B.publishProgress(d), coachRoster: () => B.coachRoster(),
     putNote: (i, d) => B.putNote(i, d), getNote: i => B.getNote(i), putReview: (i, d) => B.putReview(i, d), getReview: i => B.getReview(i), myReviews: () => B.myReviews(),
+    resSignUp: (sc, i, e, p) => B.resSignUp(sc, i, e, p), resSignIn: (sc, i, p) => B.resSignIn(sc, i, p), resSession: () => B.resSession(), resResend: () => B.resResend(), resCheck: () => B.resCheck(), resSignOut: () => B.resSignOut(), resGet: (e, i) => B.resGet(e, i), resVerifyNow: () => B.resVerifyNow ? B.resVerifyNow() : Promise.resolve(false), normSid,
     friendCode: () => B.friendCode(), findCode: c => B.findCode(cleanCode(c)), requestFriend: o => B.requestFriend(o), myFriendships: () => B.myFriendships(), acceptFriend: i => B.acceptFriend(i), removeFriend: i => B.removeFriend(i), publishFeed: d => B.publishFeed(d), getFeed: u => B.getFeed(u), cleanCode,
-    eventsList: s => B.eventsList(s), putEvent: (e, r) => B.putEvent(e, r), deleteEvent: i => B.deleteEvent(i), getResult: (e, t) => B.getResult(e, t)
+    eventsList: s => B.eventsList(s), putEvent: (e, r, lg) => B.putEvent(e, r, lg), deleteEvent: i => B.deleteEvent(i), getResult: (e, t) => B.getResult(e, t)
   };
   return api;
 })();
