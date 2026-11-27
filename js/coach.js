@@ -216,8 +216,10 @@ const COACH = { roster: [], pending: [], loaded: false, loading: false, err: '',
 const COACH_EXTRA = {};   // views added by later scripts: name -> function
 const COACH_VIEWS = { students: ['Students', 'coach'], verify: ['Verify notes', 'shield'], results: ['Results', 'medal'], account: ['Account', 'profile'] };
 const TRAINER_VIEWS = { students: ['Clients', 'coach'], account: ['Account', 'profile'] };
-const viewsFor = () => Cloud.user && Cloud.user.role === 'trainer' ? TRAINER_VIEWS : COACH_VIEWS;
+const PARENT_VIEWS = { requests: ['Requests', 'shield'], pacct: ['Account', 'profile'] };
+const viewsFor = () => Cloud.user && Cloud.user.role === 'trainer' ? TRAINER_VIEWS : Cloud.user && Cloud.user.role === 'parent' ? PARENT_VIEWS : COACH_VIEWS;
 async function coachLoad() {
+  if (Cloud.user && Cloud.user.role === 'parent') { COACH.loaded = true; COACH.err = ''; return; }
   COACH.loading = true;
   try {
     const raw = await Cloud.coachRoster(), by = {};
@@ -234,17 +236,17 @@ async function coachLoad() {
 async function coachRefresh(silent) { if (UI.screen !== 'coach') return; if (!silent) { COACH.loaded = false; coachDraw(); } await coachLoad(); coachDraw(); }
 function showCoachApp(path) {
   const { q } = parseHash();
-  const V = viewsFor(), isT = Cloud.user.role === 'trainer', view = V[path] || path === 'student' ? path : 'students';
+  const V = viewsFor(), isT = Cloud.user.role === 'trainer', isP = Cloud.user.role === 'parent', view = V[path] || path === 'student' ? path : Object.keys(V)[0];
   if (path !== view) history.replaceState(null, '', '#/' + view);
   const u = Cloud.user, first = UI.screen !== 'coach';
   UI.coachView = view; UI.coachStu = q.get('id');
   if (first) {
     setScreen('coach', `<div class="app-wrap"><div class="app">
       <aside class="side" aria-label="Main">
-        <a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse <span class="pill line" style="margin-left:4px">${isT ? 'Trainer' : 'Coach'}</span></a>
+        <a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse <span class="pill line" style="margin-left:4px">${isT ? 'Trainer' : isP ? 'Parent' : 'Coach'}</span></a>
         <nav class="side-nav">${Object.entries(V).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t}</span><span class="badge" ${v === 'verify' ? 'id="v-badge"' : ''}></span></a>`).join('')}</nav>
-        <div class="side-block"><b>${esc(u.name)}</b>${isT ? `<div class="muted" style="font-size:12.5px;margin-top:4px">${esc(u.email)}</div>` : `<div class="muted" style="font-size:12.5px;margin-top:4px">${esc(Cloud.schoolName(u.school))}</div><div class="muted" style="font-size:12.5px">${esc((u.sports || []).map(s => s === 'general' ? 'PE' : SPORTS[s].split(' (')[0]).join(', '))}</div>`}</div>
-        <div class="side-foot"><span class="save-state"><span class="dot"></span>${Cloud.mode === 'firebase' ? (isT ? 'Trainer account' : 'Coach account') : (isT ? 'Trainer · demo mode' : 'Coach · demo mode')}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
+        <div class="side-block"><b>${esc(u.name)}</b>${isT || isP ? `<div class="muted" style="font-size:12.5px;margin-top:4px">${esc(u.email)}</div>` : `<div class="muted" style="font-size:12.5px;margin-top:4px">${esc(Cloud.schoolName(u.school))}</div><div class="muted" style="font-size:12.5px">${esc((u.sports || []).map(s => s === 'general' ? 'PE' : SPORTS[s].split(' (')[0]).join(', '))}</div>`}</div>
+        <div class="side-foot"><span class="save-state"><span class="dot"></span>${Cloud.mode === 'firebase' ? (isT ? 'Trainer account' : isP ? 'Parent account' : 'Coach account') : (isT ? 'Trainer · demo mode' : isP ? 'Parent · demo mode' : 'Coach · demo mode')}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
       </aside>
       <div class="main"><header class="topbar" id="topbar"><a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse</a><h1 class="pg" id="pg-title"></h1>
         <div class="topbar-r"><button class="icon-btn" data-act="coach-reload" aria-label="Refresh" data-tip="Refresh">${IC.reset}</button><button class="icon-btn" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button><a class="top-avatar" href="#/account" aria-label="Account">${esc(initials(u.name))}</a></div></header>

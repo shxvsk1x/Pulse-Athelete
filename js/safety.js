@@ -4,7 +4,7 @@
 
 /* ---------- consent for under-18s ---------- */
 const minor = (st = S) => !!(st && st.profile && !st.sample && st.profile.age && +st.profile.age < 18);
-const consentOK = (st = S) => !minor(st) || !!(st.consent && st.consent.parent);
+const consentOK = (st = S) => !minor(st) || !!(st.consent && st.consent.parent && st.consent.verified);
 /* nothing is shared with coaches or trainers until a parent or guardian agrees */
 const _progressDocs = progressDocs;
 progressDocs = function (st) { return consentOK(st) ? _progressDocs(st) : []; };
@@ -19,21 +19,42 @@ coachDetail = function (st, p) {
   return d;
 };
 
-function consentModal() {
-  const p = S.profile;
-  const m = openModal({ title: 'A parent or guardian needs to agree', sub: `${esc(p.name || 'You')} is under 18. Until a parent or guardian agrees, Pulse keeps everything on this device: nothing goes to coaches, a personal trainer, or the leaderboard.`, size: 520,
-    body: `<div class="field"><label for="cn-name">Parent or guardian’s full name</label><input class="input" id="cn-name" autocomplete="off" maxlength="60"></div>
-    <label class="chk" style="margin-top:12px"><input type="checkbox" id="cn-ok"><span>I am this student’s parent or guardian. I agree that Pulse may share a progress summary (sessions, weigh-ins, food and health notes) with coaches at their school, and with a personal trainer if the student chooses and accepts one. I can withdraw this at any time in Profile.</span></label>
-    <p class="muted" style="font-size:12.5px;margin-top:10px">This is a record of agreement kept on the student’s account. Schools may also collect their own consent forms.</p><p class="err" id="cn-err" role="alert" hidden></p>`,
-    actions: [{ label: 'Cancel' }, { label: 'I agree', kind: 'btn-primary', fn: () => {
-      const n = $('#cn-name').value.trim(), ok = $('#cn-ok').checked, e = $('#cn-err');
-      if (n.length < 3 || !ok) { e.hidden = false; e.textContent = 'Enter the parent or guardian’s name and tick the box.'; return false; }
-      S.consent = { at: Date.now(), by: 'parent', parent: n.slice(0, 60), ver: 1 }; save(); Sync.lastTr = ''; Sync.now(); refresh(); toast('Thank you. Coaches at the school can now follow progress.');
-    } }] });
+/* Consent is real only when a parent has approved from their own verified Pulse account (parentConsents/{child}). */
+const PC = { t: 0 };
+const maskEmail = e => String(e || '').replace(/^(.).*(@.*)$/, '$1•••$2');
+async function consentSync(force) {
+  const u = Cloud.user;
+  if (!u || u.role !== 'student' || !minor() || (!force && Date.now() - PC.t < 120000)) return null;
+  PC.t = Date.now();
+  let d = null; try { d = await Cloud.gget('parentConsents', u.uid); } catch (e) { return null; }
+  PC.doc = d;
+  const was = consentOK();
+  if (d && d.status === 'granted') { if (!was || !S.consent.verified) { S.consent = { at: d.at || Date.now(), by: 'parent', parent: d.parentName || 'Parent', verified: true, ver: 2 }; save(); Sync.lastTr = ''; Sync.now(); if (UI.view) refresh(); } }
+  else if (S.consent) { delete S.consent; S.boardConsent = false; save(); Sync.now(); try { await boardWithdraw(); } catch (e) {} if (UI.view) refresh(); }
+  return d;
+}
+async function consentModal() {
+  const u = Cloud.user;
+  if (!u || u.role !== 'student') { toast('Create your Pulse account first. A parent then approves it from their own email.', { type: 'err' }); return; }
+  const d = await consentSync(true);
+  const pending = d && d.status === 'pending', declined = d && (d.status === 'declined' || d.status === 'revoked');
+  openModal({ title: 'Ask a parent or guardian', size: 520,
+    sub: `${esc(S.profile.name || 'You')} is under 18. Until a parent or guardian approves, Pulse keeps everything on this device: nothing goes to coaches, a personal trainer, or the leaderboard.`,
+    body: pending ? `<p>Waiting for approval from <b>${esc(maskEmail(d.parentEmail))}</b>.</p><ol class="muted" style="font-size:13.5px;padding-left:18px"><li>Your parent opens Pulse and taps <b>I’m a parent</b> on the sign-up page.</li><li>They sign up with that email and verify it from the link we email them.</li><li>They open Requests and approve.</li></ol><p class="muted" style="font-size:13px">Then tap Check now here.</p>`
+      : `${declined ? `<p class="err">${d.status === 'revoked' ? 'Your parent withdrew approval.' : 'Your parent declined.'} You can ask again.</p>` : ''}<div class="field"><label for="cn-email">Parent or guardian’s email</label><input class="input" id="cn-email" type="email" autocomplete="off" placeholder="parent@example.com" maxlength="80"></div>
+      <p class="muted" style="font-size:12.5px;margin-top:10px">They need their own free Pulse parent account with this email, verified by a link we send. They can withdraw approval any time. Use their own email address, not yours.</p><p class="err" id="cn-err" role="alert" hidden></p>`,
+    actions: pending ? [{ label: 'Close' }, { label: 'Cancel request', fn: async () => { try { await Cloud.gdel('parentConsents', u.uid); PC.doc = null; toast('Request cancelled.'); } catch (e) { toast(e.message, { type: 'err' }); } } }, { label: 'Check now', kind: 'btn-primary', fn: async () => { const x = await consentSync(true); toast(x && x.status === 'granted' ? 'Approved. Thank you.' : 'Not approved yet.'); } }]
+      : [{ label: 'Cancel' }, { label: 'Send request', kind: 'btn-primary', fn: async () => {
+        const em = $('#cn-email').value.trim().toLowerCase(), e = $('#cn-err');
+        if (!Cloud.validEmail(em)) { e.hidden = false; e.textContent = 'Enter a valid email address.'; return false; }
+        if (em === String(u.email).toLowerCase()) { e.hidden = false; e.textContent = 'That is your own email. Use your parent’s or guardian’s.'; return false; }
+        try { if (d) await Cloud.gdel('parentConsents', u.uid); await Cloud.gput('parentConsents', u.uid, { child: u.uid, childName: u.name, school: u.school || '', parentEmail: em, status: 'pending', at: Date.now() }); PC.t = 0; toast('Request saved. Ask your parent to sign up as a parent with that email.'); }
+        catch (x) { e.hidden = false; e.textContent = x.message || 'Could not send.'; return false; }
+      } }] });
 }
 function consentBanner() {
   if (consentOK() || S.sample) return '';
-  return `<section class="card card-pad c-12" style="border-color:var(--warn,#d9a400)"><div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><span class="acct-ic">${IC.shield}</span><div style="flex:1;min-width:220px"><b>Parent or guardian consent needed</b><p class="muted" style="font-size:13.5px;margin-top:2px">Nothing is shared with coaches, trainers or the leaderboard until a parent or guardian agrees.</p></div><button class="btn btn-primary btn-sm" data-act="consent">Add consent</button></div></section>`;
+  return `<section class="card card-pad c-12" style="border-color:var(--warn,#d9a400)"><div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><span class="acct-ic">${IC.shield}</span><div style="flex:1;min-width:220px"><b>Parent or guardian consent needed</b><p class="muted" style="font-size:13.5px;margin-top:2px">Nothing is shared with coaches, trainers or the leaderboard until a parent or guardian agrees.</p></div><button class="btn btn-primary btn-sm" data-act="consent">Ask a parent</button></div></section>`;
 }
 const _today = VIEWS.today; VIEWS.today = () => { const h = _today(), b = consentBanner() + msgBanner(); if (!b) return h; const i = h.indexOf('<div class="dash'); return i < 0 ? b + h : h.replace(/(<div class="dash[^>]*>)/, '$1' + b); };
 const _coachV = VIEWS.coach; VIEWS.coach = () => { const h = _coachV(), b = consentBanner() + inboxCard(); if (!b) return h; return h.replace(/(<div class="dash[^>]*>)/, '$1' + b); };
@@ -99,7 +120,7 @@ VIEWS.profile = () => {
   const h = _profile2(), m = '<p class="muted c-12" style="font-size:12.5px;max-width:60em">Pulse gives general';
   if (S.sample) return h;
   const card = `<section class="card c-12"><div class="card-h"><h3>Safety and sharing</h3></div><div class="card-b settings">
-    ${minor() ? `<div class="set-row"><div><b>Parent or guardian consent</b><span>${consentOK() ? 'Given' + (S.consent.parent ? ' by ' + esc(S.consent.parent) : '') + ' on ' + fmtDate(new Date(S.consent.at)) + '. Coaches at your school can follow your progress.' : 'Not given yet. Nothing is shared with coaches, trainers or the leaderboard.'}</span></div>${consentOK() ? '<button class="btn btn-ghost btn-sm" data-act="consent-withdraw">Withdraw</button>' : '<button class="btn btn-primary btn-sm" data-act="consent">Add consent</button>'}</div>` : ''}
+    ${minor() ? `<div class="set-row"><div><b>Parent or guardian consent</b><span>${consentOK() ? 'Given' + (S.consent.parent ? ' by ' + esc(S.consent.parent) : '') + ' on ' + fmtDate(new Date(S.consent.at)) + '. Coaches at your school can follow your progress.' : 'Not given yet. Nothing is shared with coaches, trainers or the leaderboard.'}</span></div>${consentOK() ? '<button class="btn btn-ghost btn-sm" data-act="consent-withdraw">Withdraw</button>' : '<button class="btn btn-primary btn-sm" data-act="consent">Ask a parent</button>'}</div>` : ''}
     <div class="set-row"><div><b>Report a problem</b><span>A message, a person, a leaderboard entry, or anything that feels unsafe. It goes to the Pulse admins.</span></div>${reportBtn({}, 'Report')}</div></div></section>`;
   return h.includes(m) ? h.replace(m, card + m) : h;
 };
@@ -107,7 +128,7 @@ VIEWS.profile = () => {
 Object.assign(ACT, {
   consent: () => consentModal(),
   'consent-withdraw': () => confirmModal({ title: 'Withdraw consent?', sub: 'Pulse stops sharing with coaches and trainers right away and removes any leaderboard entries. Your plan and logs stay on your own account.', confirm: 'Withdraw', onConfirm: async () => {
-    delete S.consent; S.boardConsent = false; save(); Sync.lastTr = ''; try { if (typeof boardWithdraw === 'function') await boardWithdraw(); } catch (e) {} Sync.now(); refresh(); toast('Consent withdrawn. Nothing is shared now.'); } }),
+    delete S.consent; S.boardConsent = false; save(); Sync.lastTr = ''; try { await Cloud.gdel('parentConsents', Cloud.user.uid); PC.doc = null; } catch (e) {} try { if (typeof boardWithdraw === 'function') await boardWithdraw(); } catch (e) {} Sync.now(); refresh(); toast('Consent withdrawn. Nothing is shared now.'); } }),
   report: el => { let c = {}; try { c = JSON.parse(el.dataset.ctx || '{}'); } catch (e) {} reportModal(c); },
   'msg-reply': el => msgModal(el.dataset.to, el.dataset.name),
   'msg-to': el => msgModal(el.dataset.to, el.dataset.name)
@@ -115,4 +136,5 @@ Object.assign(ACT, {
 /* trainer link must not be accepted by an under-18 without consent */
 const _trAccept = ACT['tr-accept']; ACT['tr-accept'] = el => { if (!consentOK()) { consentModal(); return; } return _trAccept(el); };
 
+setTimeout(() => consentSync(true), 2500); setInterval(() => consentSync(), 150000);
 setTimeout(() => { if (Cloud.user && Cloud.user.school) msgLoad().then(() => { if (UI.view === 'today') refresh(); }); }, 3000);

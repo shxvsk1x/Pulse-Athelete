@@ -63,7 +63,7 @@ const Cloud = (() => {
         else { if (code.length < 6) throw err('Your school is new on Pulse. Choose a coach access code of at least 6 characters. Other coaches will need it to join.'); db.schools[id] = { code, name: d.schoolName || pretty(id) }; db.dir[id] = { name: d.schoolName || pretty(id) }; }
       }
       const uid = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const u = { uid, email, name: d.name, role: d.role, school: d.school || '', schoolName: d.schoolName || schoolName(d.school), verified: d.role !== 'trainer', grade: d.grade || '', sports: d.sports || [], createdAt: Date.now(), hash: await sha(email + '|' + d.password) };
+      const u = { uid, email, name: d.name, role: d.role, school: d.school || '', schoolName: d.schoolName || schoolName(d.school), verified: !['trainer', 'parent'].includes(d.role), grade: d.grade || '', sports: d.sports || [], createdAt: Date.now(), hash: await sha(email + '|' + d.password) };
       db.users[uid] = u; L.put(db); lsSet('pulse.cloud.session', uid); me = L.pub(u); return me;
     },
     async signIn(email, password) {
@@ -206,7 +206,7 @@ const Cloud = (() => {
         if (d.role === 'coach') await undo(err('That coach access code is not right for this school. Ask the coach who set the school up on Pulse.'));
         await undo(fbErr(e));
       }
-      if (d.role === 'trainer') { try { await cred.user.sendEmailVerification({ url: location.origin + location.pathname }); } catch (e) {} doc.emailVerified = false; }
+      if (d.role === 'trainer' || d.role === 'parent') { try { await cred.user.sendEmailVerification({ url: location.origin + location.pathname }); } catch (e) {} doc.emailVerified = false; }
       delete doc.coachCode; me = Object.assign({ uid: cred.user.uid }, doc); return me;
     },
     async signIn(email, password) {
