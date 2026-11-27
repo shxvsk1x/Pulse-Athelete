@@ -237,7 +237,7 @@ const ALLERGY_WORDS = { dairy: ['dairy', 'milk', 'lactose', 'paneer', 'curd', 'c
 /* =========================================================
    ENGINE
    ========================================================= */
-function injuriesOf(p) { const t = (p.injuries || '').toLowerCase(); return Object.keys(INJ_WORDS).filter(k => INJ_WORDS[k].some(w => t.includes(w))); }
+function injuriesOf(p) { const t = (p.injuries || '').toLowerCase(), base = Object.keys(INJ_WORDS).filter(k => INJ_WORDS[k].some(w => t.includes(w))), pain = typeof painActive === 'function' ? painActive().map(x => x.area) : []; return [...new Set([...base, ...pain])]; }
 function allergensOf(p) { const t = (p.allergies || '').toLowerCase(); return Object.keys(ALLERGY_WORDS).filter(k => ALLERGY_WORDS[k].some(w => t.includes(w))); }
 function kitOf(p) {
   if (p.where === 'none') return ['none'];

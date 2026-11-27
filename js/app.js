@@ -3,11 +3,12 @@
    ========================================================= */
 
 const LS = 'pulse.v3', LS_DRAFT = 'pulse.draft', LS_PREFS = 'pulse.prefs', LS_THEME = 'pulse.theme';
-const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'trainer', 'results', 'profile'];
+const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'trainer', 'results', 'profile', 'missed'];
 /* someone who is not at a school (university, or an adult) never sees the school-only tabs */
 const adultMode = () => !!(S && S.profile && !S.sample && !S.profile.school);
 const SCHOOL_ONLY = ['coach', 'results'];
-const navViews = () => APP_VIEWS.filter(v => !(adultMode() && SCHOOL_ONLY.includes(v)));
+const HIDDEN_NAV = ['missed'];
+const navViews = () => APP_VIEWS.filter(v => !HIDDEN_NAV.includes(v) && !(adultMode() && SCHOOL_ONLY.includes(v)));
 const LANDING_SECTIONS = ['method', 'product', 'block', 'science', 'faq'];
 const VIEW_META = {
   today: { t: 'Today', ic: 'today' },
@@ -19,6 +20,7 @@ const VIEW_META = {
   coach: { t: 'Coach', ic: 'coach' },
   friends: { t: 'Friends', ic: 'coach' },
   trainer: { t: 'Trainer', ic: 'shield' },
+  missed: { t: 'Missed day', ic: 'today' },
   results: { t: 'Results', ic: 'medal' },
   profile: { t: 'Profile', ic: 'profile' }
 };
@@ -538,7 +540,7 @@ VIEWS.today = () => {
   return `<div class="ph"><div><div class="label">${DAYS_L[wd(d)]} · ${fmtDate(d)}</div><h2 style="margin-top:8px">${greet()}, <em>${esc(p.name)}.</em></h2><p>${line}</p></div>
     <div class="ph-actions"><span class="pill line">Week ${i + 1} · ${ph.n}</span></div></div>
     <div class="dash stagger">
-      ${hydrationNote()}${weighInCard()}${adjustCard()}
+      ${hydrationNote()}${weighInCard()}${adjustCard()}${missedCard()}
       <section class="card card-pad c-7" aria-labelledby="t-sess">${todaySessionCard(sess, done)}</section>
       <section class="card water-card c-5">${waterCard()}</section>
       <section class="card c-6" aria-labelledby="t-ready">${readinessCard()}</section>
@@ -692,7 +694,7 @@ VIEWS.session = () => {
   return `<div class="ph"><div><div class="label">Ready when you are</div><h2 style="margin-top:8px">${esc(sess.name)}</h2><p>${esc(sess.focus)} · ${plural(tot, 'set')} · about ${sess.mins} minutes</p></div>
     <div class="ph-actions"><button class="btn btn-primary btn-lg" data-act="start">${IC.play}Start session</button></div></div>
     <div class="dash">
-      <div class="card c-5"><div class="card-h"><h3>Warm up first</h3><span class="label">6 min</span></div><div class="card-b"><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${formLinks(b)}</span></span><span>${c}</span></li>`).join('')}</ul></div></div>
+      <div class="card c-5"><div class="card-h"><h3>Warm up first</h3><span class="label">6 min</span></div><div class="card-b"><ul class="mini-list">${RAMP.map(([a, b, c]) => `<li><span><b style="font-weight:550">${a}</b> <span class="muted">· ${formLinks(b)}</span></span><span>${c}</span></li>`).join('')}</ul>${routineBtns()}</div></div>
       <div class="card c-7"><div class="card-h"><h3>What is coming</h3><span class="label">${sess.phase.n} week</span></div><div class="card-b"><ol class="ex-peek" style="margin:0">${sess.exs.map((e, i) => `<li><span class="i">${String(i + 1).padStart(2, '0')}</span><span>${formName(e.n)}</span><span class="sr2">${e.sets} × ${e.reps}</span></li>`).join('')}</ol>
       <p class="muted" style="font-size:13px;margin-top:14px">Tap any exercise to watch how it is done. During the session, tap each set as you finish it.</p>${sessionWaterTip()}</div></div>
     </div>`;
@@ -707,14 +709,15 @@ function liveSession() {
       <div style="text-align:right"><div class="clock" id="clock" aria-label="Elapsed time">${hms((Date.now() - a.start) / 1000)}</div><div class="label" style="margin-top:6px" id="sets-lbl">${dn} / ${tot} sets</div></div></div>
     <div class="live-progress" role="progressbar" aria-label="Sets completed" aria-valuemin="0" aria-valuemax="${tot}" aria-valuenow="${dn}"><i id="live-bar" style="width:${tot ? dn / tot * 100 : 0}%"></i></div>
     ${runStrip()}
+    <div class="live-water" style="border-top:0">${IC.clock}<span>Warm up properly and cool down after.</span><button class="btn btn-quiet btn-sm" data-act="rt-warm">Guided warm-up</button><button class="btn btn-quiet btn-sm" data-act="rt-cool">Cool-down</button></div>
     <div class="live-water">${IC.drop}<span>Sip water between sets: 150–250 ml every 15–20 minutes.</span><button class="btn btn-quiet btn-sm" data-act="drink" data-ml="200">${IC.plus}Log 200 ml</button></div>
     ${sess.exs.map(e => {
-      const arr = a.sets[e.key] || [], complete = arr.filter(Boolean).length >= e.sets, last = lastKg(e.n), kg = a.kg[e.n] ?? last ?? '';
+      const arr = a.sets[e.key] || [], complete = arr.filter(Boolean).length >= e.sets, last = lastKg(e.n), pg = progressionFor(e), kg = a.kg[e.n] ?? (pg && pg.kg) ?? last ?? '';
       return `<div class="lx ${complete ? 'complete' : ''}" data-lx="${esc(e.key)}">
         <div class="lx-top">${formThumb(e.n, 'sm')}<div style="min-width:0"><h5><span class="tickc">${IC.check}</span>${esc(e.n)}</h5><p>${e.sets} × ${e.reps} · rest ${restTxt(e.rest)} · RPE ${e.rpe} · ${esc(e.cue)}</p></div></div>
         <div class="lx-row"><div class="sets" role="group" aria-label="Sets for ${esc(e.n)}">${Array.from({ length: e.sets }, (_, j) => setBtn(e, j, arr[j], a)).join('')}</div>
         ${isLoaded(e) ? `<div class="kg"><button data-act="kg" data-n="${esc(e.n)}" data-v="-2.5" aria-label="Decrease weight">${IC.minus}</button><input type="number" inputmode="decimal" step="0.5" min="0" data-kg="${esc(e.n)}" value="${kg}" placeholder="0" aria-label="Weight in kilograms for ${esc(e.n)}"><span class="u">kg</span><button data-act="kg" data-n="${esc(e.n)}" data-v="2.5" aria-label="Increase weight">${IC.plus}</button></div>` : ''}</div>
-        ${last ? `<div class="last" style="margin-top:10px">Last time: ${fmt1(last)} kg</div>` : ''}</div>`;
+        ${last ? `<div class="last" style="margin-top:10px">Last time: ${fmt1(last)} kg</div>` : ''}${progNote(e)}<button class="btn btn-quiet btn-sm" style="margin-top:6px" data-act="pain" data-key="${esc(e.key)}">${IC.alert}Something hurts?</button></div>`;
     }).join('')}
     ${extras.map(x => `<div class="lx"><div class="label" style="margin-bottom:8px">${esc(x.t)} · optional</div><ul class="mini-list">${x.items.map(([n, r]) => `<li><span>${formName(n)}</span><span>${esc(r)}</span></li>`).join('')}</ul></div>`).join('')}
     <div class="card-f" style="padding:16px 22px"><button class="btn btn-quiet" data-act="discard">${IC.trash}Discard</button><button class="btn btn-primary btn-lg" data-act="finish">Finish session ${IC.arrow}</button></div>
@@ -771,6 +774,7 @@ function toggleSet(key, j) {
   } else if (running) {                          // finish the set being timed
     const end = Date.now(), sec = Math.max(1, Math.round((end - a.run.s) / 1000));
     T[j] = { s: a.run.s, e: end, sec }; arr[j] = true; a.run = null;
+    if (a.kg[e.n] == null) { const g = progressionFor(e), d = g ? g.kg : lastKg(e.n); if (d) a.kg[e.n] = d; }
     if (navigator.vibrate) navigator.vibrate(12);
   } else {                                       // start timing this set
     if (a.run) { const other = sess.exs.find(x => x.key === a.run.key); toast(`Finish <b>${esc(other ? other.n : 'the set')} · set ${a.run.j + 1}</b> first, or cancel it.`, { type: 'err' }); return; }
@@ -866,6 +870,7 @@ function doneScreen({ entry, pbs }) {
     ${pbs.length ? `<div class="card" style="margin-top:14px;background:var(--surface-2)"><div class="card-h"><h3>New personal bests</h3><span class="pill acc">${pbs.length}</span></div><div class="card-b"><ul class="pb-list">${pbs.map(p => `<li><div><div class="nm">${esc(p.n)}</div><div class="dt">${p.prev ? `Up from ${fmt1(p.prev)} kg` : 'First logged weight'}</div></div><b>${fmt1(p.v)} kg</b></li>`).join('')}</ul></div></div>` : ''}
     <div class="acwr" style="margin-top:14px;background:color-mix(in srgb, #3B82C4 10%, transparent)"><span style="color:#3B82C4">${IC.drop.replace('<svg', '<svg width="22" height="22"')}</span><p><b>Drink ${entry.mins > 50 ? '500–750' : '400–500'} ml in the next hour.</b> You lost water through sweat, and even mild dehydration slows recovery. <button class="link-tip" data-act="drink" data-ml="500">Log 500 ml now</button></p></div>
     <div class="acwr" style="margin-top:14px">${IC.fuel.replace('<svg', '<svg width="22" height="22"')}<p><b>Refuel in the next two hours.</b> Aim for ${Math.round(S.profile.weight * 0.3)}–${Math.round(S.profile.weight * 0.4)} g of protein plus carbs, like ${S.profile.diet === 'vegan' ? 'dal, rice and a pea shake' : S.profile.diet === 'veg' ? 'paneer with roti, or curd and a banana' : 'chicken, rice and fruit'}.</p></div>
+    <div style="margin-top:14px"><button class="btn btn-ghost btn-sm" data-act="rt-cool">${IC.clock}Cool-down timer</button></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><a class="btn btn-primary" href="#/today">Back to today</a><a class="btn btn-ghost" href="#/progress">See progress</a><a class="btn btn-quiet" href="#/fuel">Log food</a></div></div></div>`;
 }
 
