@@ -21,8 +21,9 @@ window.PULSE_CONFIG = {
   //   appId: '...'
   // },
 
-  /* Schools that can use Pulse. The id must match the document name you create
-     under "schools" in Firestore (that document holds the coach access code). */
+  /* Schools listed here are suggested to everyone and have a ready-made id. Any other school
+     can be typed in at sign-up and sets itself up. For a school listed here, create the coach
+     access code yourself under "schools" in Firestore (document id = the id below). */
   schools: [
     { id: 'vasant-valley', name: 'Vasant Valley School' }
   ],

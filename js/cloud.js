@@ -11,7 +11,14 @@ const Cloud = (() => {
   let fb = null;               // { auth, db } in firebase mode
   const SDK = '10.14.1';
 
-  const schoolName = id => ((cfg.schools || []).find(s => s.id === id) || {}).name || id || '';
+  /* schools: anyone can type their school's name. The id is a tidy version of the name, so "Vasant Valley School" and "vasant valley" land on the same school. */
+  const dirCache = {};      // id -> name, for schools other people have set up
+  const slug = n => String(n || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(w => w && w !== 'school' && w !== 'the').join('-').slice(0, 60);
+  const pretty = id => String(id || '').split('-').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+  const knownSchools = () => { const m = {}; (cfg.schools || []).forEach(s => m[s.id] = s.name); Object.keys(dirCache).forEach(k => { if (!m[k]) m[k] = dirCache[k]; }); return m; };
+  const schoolName = (id, fb) => id ? (knownSchools()[id] || (me && me.school === id && me.schoolName) || fb || pretty(id)) : '';
+  const schoolId = name => { const s = slug(name); if (!s) return ''; const m = knownSchools(); if (m[s]) return s; const hit = Object.keys(m).find(k => slug(m[k]) === s); return hit || s; };
+  const isKnown = id => !!knownSchools()[id];
   const err = msg => { const e = new Error(msg); e.friendly = true; return e; };
   const lsGet = k => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
@@ -37,16 +44,20 @@ const Cloud = (() => {
 
   /* ---------------- LOCAL (demo) backend ---------------- */
   const L = {
-    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; d.friends = d.friends || { codes: {}, ships: {}, feed: {} }; d.rlog = d.rlog || { logins: {}, rows: {} }; return d; },
+    db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; d.friends = d.friends || { codes: {}, ships: {}, feed: {} }; d.rlog = d.rlog || { logins: {}, rows: {} }; d.dir = d.dir || {}; d.schools = d.schools || {}; d.trn = d.trn || { codes: {}, links: {}, feed: {} }; return d; },
     put(db) { if (!lsSet('pulse.cloud', db)) throw err('This browser is out of storage space.'); },
     async init() { const uid = lsGet('pulse.cloud.session'); const u = uid && L.db().users[uid]; me = u ? L.pub(u) : null; },
     pub(u) { const { hash, ...rest } = u; return rest; },
     async signUp(d) {
       const db = L.db(), email = cleanEmail(d.email);
       if (Object.values(db.users).some(u => u.email === email)) throw err('An account with this email already exists. Log in instead.');
-      if (d.role === 'coach' && String(d.coachCode || '').trim().toUpperCase() !== String(cfg.demoCoachCode || '').toUpperCase()) throw err('That coach access code is not right. Ask your school’s Pulse admin for it.');
+      if (d.role === 'coach') {
+        const id = d.school, code = String(d.coachCode || '').trim(), known = (cfg.schools || []).some(s => s.id === id) || db.dir[id];
+        if (known) { const want = (db.schools[id] && db.schools[id].code) || cfg.demoCoachCode || ''; if (code.toUpperCase() !== String(want).toUpperCase()) throw err('That coach access code is not right for this school. Ask the coach who set the school up on Pulse.'); }
+        else { if (code.length < 6) throw err('Your school is new on Pulse. Choose a coach access code of at least 6 characters. Other coaches will need it to join.'); db.schools[id] = { code, name: d.schoolName || pretty(id) }; db.dir[id] = { name: d.schoolName || pretty(id) }; }
+      }
       const uid = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const u = { uid, email, name: d.name, role: d.role, school: d.school || '', schoolName: schoolName(d.school), grade: d.grade || '', sports: d.sports || [], createdAt: Date.now(), hash: await sha(email + '|' + d.password) };
+      const u = { uid, email, name: d.name, role: d.role, school: d.school || '', schoolName: d.schoolName || schoolName(d.school), verified: d.role !== 'trainer', grade: d.grade || '', sports: d.sports || [], createdAt: Date.now(), hash: await sha(email + '|' + d.password) };
       db.users[uid] = u; L.put(db); lsSet('pulse.cloud.session', uid); me = L.pub(u); return me;
     },
     async signIn(email, password) {
@@ -57,7 +68,28 @@ const Cloud = (() => {
     },
     async signOut() { lsDel('pulse.cloud.session'); me = null; },
     async resetPassword() { throw err('Password reset needs the online version of Pulse. In demo mode, make a new account instead.'); },
-    async updateProfile(f) { const db = L.db(), u = db.users[me.uid]; Object.assign(u, f, f.school !== undefined ? { schoolName: schoolName(f.school) } : {}); L.put(db); me = L.pub(u); return me; },
+    async updateProfile(f) { const db = L.db(), u = db.users[me.uid]; Object.assign(u, f, f.school !== undefined ? { schoolName: f.schoolName || schoolName(f.school) } : {}); L.put(db); me = L.pub(u); return me; },
+    async schoolList() { const db = L.db(); Object.keys(db.dir).forEach(k => dirCache[k] = db.dir[k].name); return knownSchools(); },
+    async schoolCode() { const db = L.db(); const c = db.schools[me.school]; return c ? c.code : (cfg.demoCoachCode || ''); },
+    async emailVerified() { const u = L.db().users[me.uid]; me = L.pub(u); return !!u.verified; },
+    async verifyNow() { const db = L.db(); db.users[me.uid].verified = true; L.put(db); me = L.pub(db.users[me.uid]); return true; },
+    async resendVerify() { return true; },
+    /* personal trainers */
+    async trainerCode() { const db = L.db(), u = db.users[me.uid]; if (u.trainerCode && db.trn.codes[u.trainerCode]) return u.trainerCode; const code = newCode(c => !db.trn.codes[c]); db.trn.codes[code] = { uid: me.uid, name: me.name }; u.trainerCode = code; L.put(db); me = L.pub(u); return code; },
+    async findTrainerCode(code) { const c = L.db().trn.codes[code]; return c ? { uid: c.uid, name: c.name } : null; },
+    async requestTrainee(o) {
+      const db = L.db(), id = me.uid + '_' + o.uid, u = db.users[me.uid];
+      if (me.role !== 'trainer') throw err('Only trainer accounts can ask to follow a client.');
+      if (!u.verified) throw err('Verify your email first. Your client sees it on your request.');
+      if (db.trn.links[id]) throw err(db.trn.links[id].status === 'accepted' ? 'This client is already linked to you.' : 'You already asked this client. They need to accept.');
+      db.trn.links[id] = { trainer: me.uid, trainee: o.uid, trainerName: me.name, trainerEmail: me.email, traineeName: o.name, status: 'pending', at: Date.now() }; L.put(db);
+    },
+    async myLinks() { return Object.entries(L.db().trn.links).filter(([, v]) => v.trainer === me.uid || v.trainee === me.uid).map(([id, v]) => Object.assign({ id }, v)); },
+    async acceptLink(id) { const db = L.db(), v = db.trn.links[id]; if (!v || v.trainee !== me.uid) throw err('That request is no longer there.'); v.status = 'accepted'; L.put(db); },
+    async removeLink(id) { const db = L.db(), v = db.trn.links[id]; if (v && (v.trainee === me.uid || v.trainer === me.uid)) { delete db.trn.links[id]; L.put(db); } },
+    async publishTrainee(doc) { const db = L.db(); db.trn.feed[me.uid] = Object.assign({}, doc, { uid: me.uid }); L.put(db); },
+    async deleteTrainee() { const db = L.db(); delete db.trn.feed[me.uid]; L.put(db); },
+    async traineeRoster() { const db = L.db(); return Object.values(db.trn.links).filter(v => v.trainer === me.uid && v.status === 'accepted').map(v => db.trn.feed[v.trainee]).filter(Boolean); },
     async loadState() { return lsGet('pulse.cloud.state.' + me.uid); },
     async saveState(st) { if (!lsSet('pulse.cloud.state.' + me.uid, st)) throw err('Could not save. Storage may be full.'); },
     async publishProgress(docs) {
@@ -68,6 +100,7 @@ const Cloud = (() => {
     },
     async coachRoster() {
       const db = L.db();
+      if (me.role === 'trainer') return L.traineeRoster();
       return Object.values(db.progress).filter(p => p.school === me.school && (me.sports || []).includes(p.sport));
     },
     async putNote(id, d) { const db = L.db(); db.notes[id] = Object.assign({}, d, { uid: me.uid }); L.put(db); },
@@ -81,15 +114,15 @@ const Cloud = (() => {
     async resSignUp(school, sid, email, pw) {
       const db = L.db(), k = rkey(school, sid), em = String(email).trim().toLowerCase();
       if (db.rlog.logins[k]) throw err('That student ID already has a results login. Log in with it, or ask your PE teacher to reset it.');
-      db.rlog.logins[k] = { email: em, hash: await sha(k + '|' + pw), verified: false }; L.put(db); lsSet('pulse.res.sess', { k, sid: normSid(sid), email: em }); return { email: em, verified: false, demo: true };
+      db.rlog.logins[k] = { email: em, hash: await sha(k + '|' + pw), verified: false }; L.put(db); lsSet('pulse.res.sess', { k, sid: normSid(sid), school, email: em }); return { email: em, verified: false, demo: true };
     },
     async resVerifyNow() { const db = L.db(), s = lsGet('pulse.res.sess'); if (!s || !db.rlog.logins[s.k]) throw err('Start by creating your login.'); db.rlog.logins[s.k].verified = true; L.put(db); return true; },
     async resSignIn(school, sid, pw) {
       const db = L.db(), k = rkey(school, sid), a = db.rlog.logins[k];
       if (!a || a.hash !== await sha(k + '|' + pw)) throw err('That student ID and password do not match. If you have no login yet, create one below.');
-      lsSet('pulse.res.sess', { k, sid: normSid(sid), email: a.email }); return { sid: normSid(sid), email: a.email, verified: !!a.verified };
+      lsSet('pulse.res.sess', { k, sid: normSid(sid), school, email: a.email }); return { sid: normSid(sid), school, email: a.email, verified: !!a.verified };
     },
-    async resSession() { const s = lsGet('pulse.res.sess'), a = s && L.db().rlog.logins[s.k]; return a ? { sid: s.sid, email: a.email, verified: !!a.verified } : null; },
+    async resSession() { const s = lsGet('pulse.res.sess'), a = s && L.db().rlog.logins[s.k]; return a ? { sid: s.sid, school: s.school, email: a.email, verified: !!a.verified } : null; },
     async resResend() { return true; },
     async resCheck() { const s = await L.resSession(); return !!(s && s.verified); },
     async resSignOut() { lsDel('pulse.res.sess'); },
@@ -145,19 +178,29 @@ const Cloud = (() => {
       const snap = await fb.db.doc('users/' + user.uid).get();
       if (!snap.exists) return null;
       const d = snap.data(); delete d.coachCode;
-      return Object.assign({ uid: user.uid, email: user.email }, d);
+      return Object.assign({ uid: user.uid, email: user.email, emailVerified: !!user.emailVerified }, d);
     },
     async signUp(d) {
       let cred;
       try { cred = await fb.auth.createUserWithEmailAndPassword(cleanEmail(d.email), d.password); } catch (e) { throw fbErr(e); }
-      const doc = { name: d.name, email: cleanEmail(d.email), role: d.role, school: d.school || '', schoolName: schoolName(d.school), grade: d.grade || '', sports: d.sports || [], createdAt: Date.now() };
-      if (d.role === 'coach') doc.coachCode = String(d.coachCode || '').trim();
+      const doc = { name: d.name, email: cleanEmail(d.email), role: d.role, school: d.school || '', schoolName: d.schoolName || schoolName(d.school), grade: d.grade || '', sports: d.sports || [], createdAt: Date.now() };
+      const undo = async m => { try { await cred.user.delete(); } catch (x) {} throw m; };
+      if (d.role === 'coach') {
+        doc.coachCode = String(d.coachCode || '').trim();
+        let known = isKnown(d.school);
+        if (!known) { try { known = (await fb.db.doc('schoolDirectory/' + d.school).get()).exists; } catch (e) {} }
+        if (!known) {
+          if (doc.coachCode.length < 6) await undo(err('Your school is new on Pulse. Choose a coach access code of at least 6 characters. Other coaches will need it to join.'));
+          try { await fb.db.doc('schools/' + d.school).set({ coachCode: doc.coachCode, owner: cred.user.uid, name: doc.schoolName }); await fb.db.doc('schoolDirectory/' + d.school).set({ name: doc.schoolName }); }
+          catch (e) { await undo(err('That school is already set up on Pulse. Use the coach access code its first coach chose.')); }
+        }
+      }
       try { await fb.db.doc('users/' + cred.user.uid).set(doc); }
       catch (e) {
-        try { await cred.user.delete(); } catch (x) {}
-        if (d.role === 'coach') throw err('That coach access code is not right for this school. Ask your school’s Pulse admin for it.');
-        throw fbErr(e);
+        if (d.role === 'coach') await undo(err('That coach access code is not right for this school. Ask the coach who set the school up on Pulse.'));
+        await undo(fbErr(e));
       }
+      if (d.role === 'trainer') { try { await cred.user.sendEmailVerification({ url: location.origin + location.pathname }); } catch (e) {} doc.emailVerified = false; }
       delete doc.coachCode; me = Object.assign({ uid: cred.user.uid }, doc); return me;
     },
     async signIn(email, password) {
@@ -168,7 +211,49 @@ const Cloud = (() => {
     },
     async signOut() { await fb.auth.signOut(); me = null; },
     async resetPassword(email) { try { await fb.auth.sendPasswordResetEmail(cleanEmail(email)); } catch (e) { throw fbErr(e); } },
-    async updateProfile(f) { const up = Object.assign({}, f); if (f.school !== undefined) up.schoolName = schoolName(f.school); try { await fb.db.doc('users/' + me.uid).update(up); } catch (e) { throw fbErr(e); } Object.assign(me, up); return me; },
+    async schoolList() { try { const q = await fb.db.collection('schoolDirectory').get(); q.forEach(d => dirCache[d.id] = d.data().name); } catch (e) {} return knownSchools(); },
+    async schoolCode() { try { const s = await fb.db.doc('schools/' + me.school).get(); return s.exists ? s.data().coachCode : ''; } catch (e) { return ''; } },
+    async emailVerified() { const u = fb.auth.currentUser; if (!u) return false; try { await u.reload(); await u.getIdToken(true); } catch (e) {} me.emailVerified = !!u.emailVerified; return me.emailVerified; },
+    async verifyNow() { return false; },
+    async resendVerify() { const u = fb.auth.currentUser; if (!u) throw err('Log in again first.'); try { await u.sendEmailVerification({ url: location.origin + location.pathname }); } catch (e) { throw fbErr(e); } return true; },
+    /* personal trainers */
+    async trainerCode() {
+      if (me.trainerCode) return me.trainerCode;
+      for (let i = 0; i < 6; i++) {
+        const code = newCode(() => true), ref = fb.db.doc('trainerCodes/' + code);
+        try {
+          if ((await ref.get()).exists) continue;
+          await ref.set({ uid: me.uid, name: me.name });
+          await fb.db.doc('users/' + me.uid).update({ trainerCode: code }); me.trainerCode = code; return code;
+        } catch (e) { if (i === 5) throw fbErr(e); }
+      }
+      throw err('Could not make a code. Try again.');
+    },
+    async findTrainerCode(code) { try { const s = await fb.db.doc('trainerCodes/' + code).get(); return s.exists ? { uid: s.data().uid, name: s.data().name } : null; } catch (e) { throw fbErr(e); } },
+    async requestTrainee(o) {
+      if (me.role !== 'trainer') throw err('Only trainer accounts can ask to follow a client.');
+      if (!(await F.emailVerified())) throw err('Verify your email first. Your client sees it on your request.');
+      const id = me.uid + '_' + o.uid, ref = fb.db.doc('trainerLinks/' + id);
+      let cur = null; try { cur = await ref.get(); } catch (e) {}
+      if (cur && cur.exists) throw err(cur.data().status === 'accepted' ? 'This client is already linked to you.' : 'You already asked this client. They need to accept.');
+      try { await ref.set({ trainer: me.uid, trainee: o.uid, trainerName: me.name, trainerEmail: me.email, traineeName: o.name, status: 'pending', at: Date.now() }); } catch (e) { throw fbErr(e); }
+    },
+    async myLinks() {
+      try {
+        const q = await fb.db.collection('trainerLinks').where(me.role === 'trainer' ? 'trainer' : 'trainee', '==', me.uid).get();
+        const out = []; q.forEach(d => out.push(Object.assign({ id: d.id }, d.data()))); return out;
+      } catch (e) { throw fbErr(e); }
+    },
+    async acceptLink(id) { try { await fb.db.doc('trainerLinks/' + id).update({ status: 'accepted' }); } catch (e) { throw fbErr(e); } },
+    async removeLink(id) { try { await fb.db.doc('trainerLinks/' + id).delete(); } catch (e) { throw fbErr(e); } },
+    async publishTrainee(doc) { try { await fb.db.doc('trainee/' + me.uid).set(Object.assign({}, doc, { uid: me.uid })); } catch (e) { throw fbErr(e); } },
+    async deleteTrainee() { try { await fb.db.doc('trainee/' + me.uid).delete(); } catch (e) { throw fbErr(e); } },
+    async traineeRoster() {
+      const links = (await F.myLinks()).filter(l => l.status === 'accepted'), out = [];
+      await Promise.all(links.map(async l => { try { const s = await fb.db.doc('trainee/' + l.trainee).get(); if (s.exists) out.push(s.data()); } catch (e) {} }));
+      return out;
+    },
+    async updateProfile(f) { const up = Object.assign({}, f); if (f.school !== undefined) up.schoolName = f.schoolName || schoolName(f.school); try { await fb.db.doc('users/' + me.uid).update(up); } catch (e) { throw fbErr(e); } Object.assign(me, up); return me; },
     async loadState() { const s = await fb.db.doc('states/' + me.uid).get(); return s.exists ? JSON.parse(s.data().json) : null; },
     async saveState(st) { try { await fb.db.doc('states/' + me.uid).set({ json: JSON.stringify(st), updatedAt: Date.now() }); } catch (e) { throw fbErr(e); } },
     async publishProgress(docs) {
@@ -181,6 +266,7 @@ const Cloud = (() => {
       await batch.commit();
     },
     async coachRoster() {
+      if (me.role === 'trainer') return F.traineeRoster();
       const out = [];
       for (const sp of me.sports || []) {
         const q = await fb.db.collection('progress').where('school', '==', me.school).where('sport', '==', sp).get();
@@ -248,9 +334,9 @@ const Cloud = (() => {
       if (!snap.exists) throw err('No results login for that student ID yet. Create one below.');
       let u; try { u = (await r.auth.signInWithEmailAndPassword(snap.data().email, pw)).user; } catch (e) { throw err(e.code === 'auth/too-many-requests' ? FBERR['auth/too-many-requests'] : 'That student ID and password do not match.'); }
       lsSet('pulse.res.sess', { sid: normSid(sid), school, email: u.email });
-      return { sid: normSid(sid), email: u.email, verified: u.emailVerified };
+      return { sid: normSid(sid), school, email: u.email, verified: u.emailVerified };
     },
-    async resSession() { const r = await F.rapp(), u = r.auth.currentUser, s = lsGet('pulse.res.sess'); return u && s ? { sid: s.sid, email: u.email, verified: u.emailVerified } : null; },
+    async resSession() { const r = await F.rapp(), u = r.auth.currentUser, s = lsGet('pulse.res.sess'); return u && s ? { sid: s.sid, school: s.school, email: u.email, verified: u.emailVerified } : null; },
     async resSignOut() { try { const r = await F.rapp(); await r.auth.signOut(); } catch (e) {} lsDel('pulse.res.sess'); },
     async resGet(evId, sid) {
       const r = await F.rapp(); if (!r.auth.currentUser) return null;
@@ -292,9 +378,11 @@ const Cloud = (() => {
 
   const B = mode === 'firebase' ? F : L;
   const api = {
-    mode, schoolName, validEmail,
+    mode, schoolName, schoolId, isKnown, knownNames: () => knownSchools(), validEmail, slug,
+    schoolList: () => B.schoolList(), schoolCode: () => B.schoolCode(), emailVerified: () => B.emailVerified(), verifyNow: () => B.verifyNow(), resendVerify: () => B.resendVerify(),
+    trainerCode: () => B.trainerCode(), findTrainerCode: c => B.findTrainerCode(cleanCode(c)), requestTrainee: o => B.requestTrainee(o), myLinks: () => B.myLinks(), acceptLink: i => B.acceptLink(i), removeLink: i => B.removeLink(i), publishTrainee: d => B.publishTrainee(d), deleteTrainee: () => B.deleteTrainee(),
     get user() { return me; },
-    async init() { try { await B.init(); } catch (e) { console.warn(e); api.offline = true; me = null; } },
+    async init() { try { await B.init(); } catch (e) { console.warn(e); api.offline = true; me = null; } try { B.schoolList().catch(() => {}); } catch (e) {} },
     signUp: d => B.signUp(d), signIn: (e, p) => B.signIn(e, p), signOut: () => B.signOut(), resetPassword: e => B.resetPassword(e),
     updateProfile: f => B.updateProfile(f), loadState: () => B.loadState(), saveState: s => B.saveState(s),
     publishProgress: d => B.publishProgress(d), coachRoster: () => B.coachRoster(),

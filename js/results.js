@@ -7,7 +7,7 @@
      only be opened by someone who knows all of those. Firestore rules also block listing the results.
    ========================================================= */
 const TIERS = ['none', 'bronze', 'silver', 'gold'], TIER_L = { none: 'No pin yet', bronze: 'Bronze pin', silver: 'Silver pin', gold: 'Gold pin' };
-const RES = { rs: null, rsLoaded: false, lg: { mode: 'login', busy: false, msg: '', email: '', demo: false }, events: [], loaded: false, loading: false, err: '', sel: null, q: '', out: null, busy: false, kind: 'private', build: null, busyBuild: false, codes: null };
+const RES = { mine: null, mineMsg: '', oldMsg: '', rs: null, rsLoaded: false, lg: { mode: 'login', busy: false, msg: '', email: '', demo: false }, events: [], loaded: false, loading: false, err: '', sel: null, q: '', out: null, busy: false, kind: 'private', build: null, busyBuild: false, codes: null };
 const b64 = u8 => btoa(String.fromCharCode(...u8)), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0)), hex = u8 => [...u8].map(x => x.toString(16).padStart(2, '0')).join('');
 const normName = s => String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const normId = s => String(s || '').toUpperCase().replace(/[\s-]/g, '');
@@ -122,82 +122,71 @@ const resRedraw = () => { if (UI.screen === 'app' && UI.view === 'results') draw
 const fmtDY = d => { try { return new Date(d + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return d; } };
 const pinPill = t => `<span class="pill ${t === 3 ? 'acc' : t ? 'good' : 'line'}">${IC.medal}${TIER_L[TIERS[t]]}</span>`;
 
-/* ---- student view ---- */
+/* ---- student view: always the school + student ID login. There is no event list to search. ---- */
+const resSchoolDefault = () => { const p = S && S.profile; return (p && (p.schoolName || (p.school && Cloud.schoolName(p.school)))) || (Cloud.user && Cloud.user.schoolName) || ''; };
 VIEWS.results = () => {
-  if (!RES.loaded) { resLoad().then(resRedraw); return `<div class="empty" style="padding:80px 8px"><span class="spin lg"></span><h4>Loading school events…</h4></div>`; }
-  const ev = RES.events.find(e => e.id === RES.sel); if (ev) return evDetail(ev);
-  const q = normName(RES.q), L = RES.events.filter(e => !q || normName(e.title + ' ' + (e.desc || '')).includes(q));
-  return `<div class="ph"><div><div class="label">${esc(Cloud.user && Cloud.user.schoolName || 'Your school')}</div><h2 style="margin-top:8px">School <em>results.</em></h2><p>Find winners from public events, or look up your own result from a fitness test. Personal results need your school ID.</p></div></div>
-    ${RES.err ? `<div class="card"><div class="card-b"><p class="muted" role="alert">${esc(RES.err)}</p></div></div>` : ''}
-    <div class="card" style="margin-bottom:16px"><div class="card-b"><div class="field"><label for="res-q">Search events</label><input class="input" id="res-q" type="search" value="${esc(RES.q)}" placeholder="e.g. track and field, fitness test" autocomplete="off"></div></div></div>
-    ${L.length ? `<div class="stack">${L.map(e => `<button class="card res-ev" data-act="res-open" data-id="${esc(e.id)}" type="button"><div class="card-b" style="display:flex;justify-content:space-between;gap:12px;align-items:center;text-align:left"><div><h3 style="font-size:16px">${esc(e.title)}</h3><div class="muted" style="font-size:13px">${esc(fmtDY(e.date))}${e.desc ? ' · ' + esc(e.desc) : ''}</div></div><span class="pill ${e.kind === 'private' ? 'warn' : 'good'}">${e.kind === 'private' ? 'Personal · ID needed' : 'Public'}</span></div></button>`).join('')}</div>`
-      : `<div class="card"><div class="empty"><div class="glyph">${IC.medal}</div><h4>${RES.events.length ? 'No events match' : 'No results yet'}</h4><p>${RES.events.length ? 'Try a different search.' : 'Your school will publish results here once they are ready.'}</p></div></div>`}`;
+  if (!RES.rsLoaded) { RES.rsLoaded = true; Cloud.resSession().then(x => { RES.rs = x; if (x && x.verified) resFetchAll(); else resRedraw(); }).catch(() => resRedraw()); }
+  const shown = RES.mine && RES.mine.length ? RES.mine.map(x => resCard(x.ev, x.rec)).join('<div style="height:16px"></div>') + '<div style="height:16px"></div>' : '';
+  return `<div class="ph"><div><div class="label">${esc(resSchoolDefault() || 'Your school')}</div><h2 style="margin-top:8px">School <em>results.</em></h2><p>Log in with your school and student ID to see your own results from fitness tests and school events.</p></div></div>
+    ${shown}${loginCard()}${oldLookupCard()}`;
 };
-function evHead(ev) { return `<div class="ph"><div><div class="label">${esc(fmtDY(ev.date))}${ev.desc ? ' · ' + esc(ev.desc) : ''}</div><h2 style="margin-top:8px">${esc(ev.title)}</h2></div><div class="ph-actions"><button class="btn btn-ghost btn-sm" data-act="res-back">${IC.back}All events</button></div></div>`; }
-function evDetail(ev) {
-  if (ev.kind === 'public') {
-    const q = normName(RES.q);
-    return `${evHead(ev)}
-      ${ev.houses && ev.houses.length ? `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>House points</h3><span class="label">5 · 3 · 1 for first to third</span></div><div class="card-b"><table class="res-t"><tr><th>House</th><th>Points</th></tr>${ev.houses.map((h, i) => `<tr><td>${i === 0 ? '<b>' : ''}${esc(h.name)}${i === 0 ? '</b>' : ''}</td><td>${h.pt}</td></tr>`).join('')}</table></div></div>` : ''}
-      <div class="card" style="margin-bottom:16px"><div class="card-b"><div class="field"><label for="res-q">Find a winner or an event</label><input class="input" id="res-q" type="search" value="${esc(RES.q)}" placeholder="Name or event, e.g. 100m" autocomplete="off"></div></div></div>
-      <div class="stack">${ev.cats.map(c => ({ c, pl: c.places.filter(p => !q || normName(c.name + ' ' + p.name + ' ' + p.house).includes(q)) })).filter(x => x.pl.length).map(({ c, pl }) => `<section class="card"><div class="card-h"><h3>${esc(c.name)}</h3></div><div class="card-b"><table class="res-t">${pl.map(p => `<tr><td style="width:3em"><b>${p.p === 1 ? '1st' : p.p === 2 ? '2nd' : p.p === 3 ? '3rd' : p.p + 'th'}</b></td><td>${esc(p.name)}</td><td class="muted">${esc(p.house)}</td><td class="muted">${esc(p.res)}</td></tr>`).join('')}</table></div></section>`).join('') || `<div class="card"><div class="empty"><h4>Nothing matches</h4><p>Try a different search.</p></div></div>`}</div>`;
-  }
-  if (RES.out && RES.out.ok) return `${evHead(ev)}${resCard(ev, RES.out.rec)}${RES.rs ? `<p class="muted" style="font-size:13px;margin-top:12px">Logged in with student ID ${esc(RES.rs.sid)}. <button class="btn btn-quiet btn-sm" data-act="rl-out">Log out</button></p>` : ''}`;
-  if (!RES.rsLoaded) { RES.rsLoaded = true; Cloud.resSession().then(x => { RES.rs = x; if (x && x.verified) resFetchLogin(ev); else resRedraw(); }).catch(() => resRedraw()); }
-  return `${evHead(ev)}${loginCard(ev)}${oldLookupCard(ev)}`;
-}
-function resFetchLogin(ev) {
+/* every personal event the school has published for this student ID */
+async function resFetchAll() {
   if (!RES.rs || !RES.rs.verified) return;
-  RES.lg.busy = true; resRedraw();
-  Cloud.resGet(ev.id, RES.rs.sid).then(rec => {
-    RES.lg.busy = false;
-    RES.out = rec ? { ok: 1, rec } : { ok: 0, msg: 'No result is published for this student ID yet. Your school list may not have your email, or it may have a different one. Ask your PE teacher.' };
-    resRedraw();
-  }).catch(x => { RES.lg.busy = false; RES.out = { ok: 0, msg: x.message || 'Could not load your result. Try again.' }; resRedraw(); });
+  RES.lg.busy = true; RES.mine = null; RES.mineMsg = ''; resRedraw();
+  try {
+    const evs = (await Cloud.eventsList(RES.rs.school)).filter(e => e.kind === 'private').sort((a, b) => (b.date || '') < (a.date || '') ? -1 : 1), out = [];
+    for (const ev of evs) { const rec = await Cloud.resGet(ev.id, RES.rs.sid); if (rec) out.push({ ev, rec }); }
+    RES.mine = out;
+    RES.mineMsg = out.length ? '' : (evs.length ? 'No result is published for this student ID yet. Your school list may not have your email, or it may have a different one. Ask your PE teacher.' : 'Your school has not published any results yet. They will show here once they do.');
+  } catch (x) { RES.mineMsg = x.message || 'Could not load your results. Try again.'; }
+  RES.lg.busy = false; resRedraw();
 }
-/* student ID + password, with a verification email for anyone who has not created a login yet */
-function loginCard(ev) {
-  const g = RES.lg, bad = RES.out && !RES.out.ok && !RES.out.old ? `<p role="alert" style="color:var(--bad);margin-top:10px">${esc(RES.out.msg)}</p>` : '';
+const schoolField = (id, g) => `<div class="field"><label for="${id}">School <span class="hint">Type your school’s name</span></label><input class="input" id="${id}" name="school" required maxlength="80" autocomplete="organization" list="rs-list" placeholder="e.g. Vasant Valley School" value="${esc(g.schoolIn != null ? g.schoolIn : resSchoolDefault())}"><datalist id="rs-list">${Object.values(typeof Cloud.knownNames === 'function' ? Cloud.knownNames() : {}).map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist></div>`;
+/* school + student ID + password, with a verification email for anyone who has not created a login yet */
+function loginCard() {
+  const g = RES.lg, bad = RES.mineMsg ? `<p role="alert" style="color:${RES.mine && RES.mine.length ? 'var(--ink-3)' : 'var(--bad)'};margin-top:10px">${esc(RES.mineMsg)}</p>` : '';
   const err = g.msg ? `<p role="alert" id="rl-err" style="color:var(--bad);margin-top:10px">${esc(g.msg)}</p>` : '';
-  const sidField = (id) => `<div class="field"><label for="${id}">Student ID</label><input class="input" id="${id}" name="sid" required maxlength="30" autocomplete="username" autocapitalize="characters" spellcheck="false" placeholder="Your school ID number" value="${esc(g.sidIn || '')}"></div>`;
-  if (RES.rs && RES.rs.verified) return `<div class="card"><div class="card-h"><h3>Your result</h3></div><div class="card-b">${g.busy ? '<div class="empty" style="padding:30px 8px"><span class="spin lg"></span><h4>Finding your result…</h4></div>' : `<p class="muted">Logged in with student ID ${esc(RES.rs.sid)}.</p>${bad}<div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-act="rl-out">Log out</button></div>`}</div></div>`;
+  const sidField = id => `<div class="field" style="margin-top:12px"><label for="${id}">Student ID</label><input class="input" id="${id}" name="sid" required maxlength="30" autocomplete="username" autocapitalize="characters" spellcheck="false" placeholder="Your school ID number" value="${esc(g.sidIn || '')}"></div>`;
+  if (RES.rs && RES.rs.verified) return `<div class="card"><div class="card-h"><h3>Your results</h3></div><div class="card-b">${g.busy ? '<div class="empty" style="padding:30px 8px"><span class="spin lg"></span><h4>Finding your results…</h4></div>' : `<p class="muted">Logged in with student ID ${esc(RES.rs.sid)} at ${esc(Cloud.schoolName(RES.rs.school))}.</p>${bad}<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-act="rl-refresh">Check again</button><button class="btn btn-ghost btn-sm" data-act="rl-out">Log out</button></div>`}</div></div>`;
   if (g.mode === 'verify') return `<div class="card"><div class="card-h"><h3>Check your email</h3></div><div class="card-b">
     <p>We sent a verification link to <b>${esc(g.email)}</b>. Open it, then come back here and tap the button below.</p>
     ${g.demo ? `<p class="muted" style="font-size:13px;margin-top:8px">Demo mode cannot send real email. Tap "Simulate the email link" to carry on.</p>` : `<p class="muted" style="font-size:13px;margin-top:8px">It can take a minute. Check spam if you cannot see it.</p>`}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">${g.demo ? '<button class="btn btn-ghost" data-act="rl-demo">Simulate the email link</button>' : ''}<button class="btn btn-primary" data-act="rl-check" ${g.busy ? 'disabled' : ''}>${g.busy ? 'Checking…' : 'I have verified my email'}</button>${g.demo ? '' : '<button class="btn btn-quiet" data-act="rl-resend">Send it again</button>'}<button class="btn btn-quiet" data-act="rl-mode" data-m="login">Back</button></div>${err}</div></div>`;
   if (g.mode === 'create') return `<div class="card"><div class="card-h"><h3>Create your student ID login</h3></div><div class="card-b">
     <p class="muted" style="font-size:14px;margin-bottom:14px">Use the email your school has for you. We send a verification link to it. You only see a result if your verified email matches the one on your school's list.</p>
-    <form id="res-create" novalidate>${sidField('rc-i')}
+    <form id="res-create" novalidate>${schoolField('rc-s', g)}${sidField('rc-i')}
       <div class="field" style="margin-top:12px"><label for="rc-e">School email</label><input class="input" id="rc-e" name="email" type="email" required maxlength="80" autocomplete="email" placeholder="you@school.org" value="${esc(g.emailIn || '')}"></div>
       <div class="field" style="margin-top:12px"><label for="rc-p">Choose a password<span class="hint">At least 8 characters</span></label><input class="input" id="rc-p" name="pw" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></div>
       <div class="field" style="margin-top:12px"><label for="rc-p2">Repeat the password</label><input class="input" id="rc-p2" name="pw2" type="password" required maxlength="72" autocomplete="new-password"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn btn-primary" ${g.busy ? 'disabled' : ''}>${g.busy ? 'Sending…' : 'Send verification email'}</button><button class="btn btn-quiet" type="button" data-act="rl-mode" data-m="login">I already have one</button></div>${err}</form></div></div>`;
-  return `<div class="card"><div class="card-h"><h3>See your own result</h3></div><div class="card-b">
-    <p class="muted" style="font-size:14px;margin-bottom:14px">Log in with your student ID and password.</p>
-    <form id="res-login" novalidate>${sidField('rg-i')}
+  return `<div class="card"><div class="card-h"><h3>See your own results</h3></div><div class="card-b">
+    <p class="muted" style="font-size:14px;margin-bottom:14px">Log in with your school, student ID and password.</p>
+    <form id="res-login" novalidate>${schoolField('rg-s', g)}${sidField('rg-i')}
       <div class="field" style="margin-top:12px"><label for="rg-p">Password</label><input class="input" id="rg-p" name="pw" type="password" required maxlength="72" autocomplete="current-password"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn btn-primary" ${g.busy || lockLeft() ? 'disabled' : ''}>${g.busy ? 'Logging in…' : 'Log in'}</button></div>${lockLeft() ? `<p class="muted" role="alert" style="margin-top:8px">Too many tries. Wait ${lockLeft()} seconds.</p>` : ''}${err}${bad}</form>
     <p style="margin-top:16px;font-size:14px">No student ID login yet? <button class="btn btn-quiet btn-sm" data-act="rl-mode" data-m="create">Create one with your email</button></p></div></div>`;
 }
-function oldLookupCard(ev) {
+function oldLookupCard() {
   const lk = lockLeft(), needLogin = Cloud.mode === 'firebase' && !Cloud.user;
   return `<details class="card" style="margin-top:16px"><summary class="card-h" style="cursor:pointer"><h3>Or use your name and date of birth</h3></summary><div class="card-b">
     <p class="muted" style="font-size:14px;margin-bottom:14px">Enter the same details your school has on file. Results are stored encrypted, so they cannot be opened without these details.</p>
-    ${ev.needCode ? `<p role="alert" style="color:var(--bad)">This result was published with an access code, which is no longer used. Ask your PE teacher to publish it again.</p>` : needLogin ? `<p><b>Log in with your Pulse account to use this option.</b></p><a class="btn btn-primary" href="#/login">Log in</a>` : `<form id="res-look" autocomplete="off" novalidate>
-      <div class="field"><label for="rl-n">Full name</label><input class="input" id="rl-n" name="name" required maxlength="60" placeholder="As on your school record"></div>
+    ${needLogin ? `<p><b>Log in with your Pulse account to use this option.</b></p><a class="btn btn-primary" href="#/login">Log in</a>` : `<form id="res-look" autocomplete="off" novalidate>
+      ${schoolField('rl-s', RES.lg)}
+      <div class="field" style="margin-top:12px"><label for="rl-n">Full name</label><input class="input" id="rl-n" name="name" required maxlength="60" placeholder="As on your school record"></div>
       <div class="field" style="margin-top:12px"><label for="rl-i">School ID</label><input class="input" id="rl-i" name="sid" required maxlength="30" autocomplete="off" placeholder="Your school ID number"></div>
       <div class="field" style="margin-top:12px"><label for="rl-d">Date of birth</label><input class="input" id="rl-d" name="dob" type="date" required></div>
-      <div style="margin-top:16px"><button class="btn btn-primary" ${RES.busy || lk ? 'disabled' : ''}>${RES.busy ? 'Checking…' : 'Show my result'}</button></div>
+      <div style="margin-top:16px"><button class="btn btn-primary" ${RES.busy || lk ? 'disabled' : ''}>${RES.busy ? 'Checking…' : 'Show my results'}</button></div>
       ${lk ? `<p class="muted" role="alert" style="margin-top:8px">Too many tries. Wait ${lk} seconds.</p>` : ''}
-      ${RES.out && !RES.out.ok && RES.out.old ? `<p role="alert" style="color:var(--bad);margin-top:10px">${esc(RES.out.msg)}</p>` : ''}</form>`}</div></details>`;
+      ${RES.oldMsg ? `<p role="alert" style="color:var(--bad);margin-top:10px">${esc(RES.oldMsg)}</p>` : ''}</form>`}</div></details>`;
 }
 function resCard(ev, r) {
   const { pin, ts } = pinOf(ev, r.scores), saved = (S.pins || []).some(p => p.ev === ev.id);
-  return `<div class="card"><div class="card-h"><div><span class="label">Result for</span><h3>${esc(r.name)}</h3></div>${pinPill(pin)}</div><div class="card-b">
+  return `<div class="card"><div class="card-h"><div><span class="label">${esc(ev.title)} · ${esc(fmtDY(ev.date))}</span><h3>${esc(r.name)}</h3></div>${pinPill(pin)}</div><div class="card-b">
     <table class="res-t"><tr><th>Test</th><th>Your result</th><th>Level</th><th>Next pin</th></tr>${ev.crit.map((c, i) => { const v = r.scores[i], t = ts[i], n = nextTarget(c, v, t); return `<tr><td>${esc(c.n)}</td><td>${v === '' ? 'Not attempted' : esc(v + ' ' + c.u)}</td><td>${t ? TIER_L[TIERS[t]].replace(' pin', '') : 'None'}</td><td class="muted">${n ? esc(n.goal + ' ' + c.u) + (n.gap != null ? ` (${+n.gap.toFixed(2)} to go)` : '') : 'Top level'}</td></tr>`; }).join('')}</table>
     <p class="muted" style="font-size:13px;margin-top:10px">${ev.rule === 'avg' ? 'Your pin is the average of your levels across all tests.' : 'Your pin is set by your lowest level across all tests.'}</p>
     ${r.note ? `<p style="margin-top:8px"><b>Note from your teacher:</b> ${esc(r.note)}</p>` : ''}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="btn btn-primary btn-sm" data-act="res-save">${saved ? 'Update saved result' : 'Save to my profile'}</button><button class="btn btn-ghost btn-sm" data-act="res-clear">Hide result</button></div></div></div>`;
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="btn btn-primary btn-sm" data-act="res-save" data-id="${esc(ev.id)}">${saved ? 'Update saved result' : 'Save to my profile'}</button></div></div></div>`;
 }
 
 /* ---- coach view ---- */
@@ -227,32 +216,30 @@ const dlFile = (name, txt, type) => { const b = new Blob([txt], { type: type || 
 
 /* ---- actions ---- */
 Object.assign(ACT, {
-  'res-open': el => { RES.sel = el.dataset.id; RES.out = null; RES.q = ''; drawView(); },
-  'res-back': () => { RES.sel = null; RES.out = null; RES.q = ''; drawView(); },
-  'res-clear': () => { RES.out = null; drawView(); },
-  'res-save': () => {
-    const ev = RES.events.find(e => e.id === RES.sel); if (!ev || !RES.out || !RES.out.ok) return;
-    const { pin } = pinOf(ev, RES.out.rec.scores); S.pins = (S.pins || []).filter(p => p.ev !== ev.id);
-    S.pins.push({ ev: ev.id, title: ev.title, date: ev.date, pin, crit: ev.crit.map((c, i) => ({ n: c.n, u: c.u, v: RES.out.rec.scores[i] })) });
+  'res-save': el => {
+    const x = (RES.mine || []).find(m => m.ev.id === el.dataset.id); if (!x) return; const ev = x.ev;
+    const { pin } = pinOf(ev, x.rec.scores); S.pins = (S.pins || []).filter(p => p.ev !== ev.id);
+    S.pins.push({ ev: ev.id, title: ev.title, date: ev.date, pin, crit: ev.crit.map((c, i) => ({ n: c.n, u: c.u, v: x.rec.scores[i] })) });
     save(); toast('Saved to your profile.'); drawView();
   },
   'res-del': el => confirmModal({ title: 'Delete this event?', sub: 'Students will no longer see these results. This cannot be undone.', confirm: 'Delete', danger: true, onConfirm: async () => {
     try { await Cloud.deleteEvent(el.dataset.id); RES.events = RES.events.filter(e => e.id !== el.dataset.id); toast('Event deleted.'); resRedraw(); } catch (e) { toast(e.message, { type: 'err' }); }
   } }),
   'rl-mode': el => { RES.lg.mode = el.dataset.m; RES.lg.msg = ''; drawView(); },
-  'rl-out': async () => { try { await Cloud.resSignOut(); } catch (e) {} RES.rs = null; RES.out = null; RES.lg = { mode: 'login', busy: false, msg: '', email: '', demo: false }; drawView(); },
+  'rl-out': async () => { try { await Cloud.resSignOut(); } catch (e) {} RES.rs = null; RES.mine = null; RES.mineMsg = ''; RES.lg = { mode: 'login', busy: false, msg: '', email: '', demo: false }; drawView(); },
+  'rl-refresh': () => resFetchAll(),
   'rl-demo': async () => { try { await Cloud.resVerifyNow(); } catch (e) { RES.lg.msg = e.message; drawView(); return; } await rlCheck(); },
   'rl-check': () => rlCheck(),
   'rl-resend': async () => { try { await Cloud.resResend(); toast('Verification email sent again.'); } catch (e) { RES.lg.msg = e.message || 'Could not send it.'; drawView(); } },
   'res-codes': () => { if (RES.codes) dlFile('access-codes.csv', 'name,id,access code\n' + RES.codes.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv'); }
 });
 async function rlCheck() {
-  const ev = RES.events.find(e => e.id === RES.sel); RES.lg.busy = true; RES.lg.msg = ''; drawView();
+  RES.lg.busy = true; RES.lg.msg = ''; drawView();
   try {
     const ok = await Cloud.resCheck(); RES.lg.busy = false;
     if (!ok) { RES.lg.msg = 'Your email is not verified yet. Open the link in the email we sent, then try again.'; drawView(); return; }
     RES.rs = await Cloud.resSession(); RES.lg.mode = 'login'; toast('Email verified. Your student ID login is ready.');
-    if (ev) resFetchLogin(ev); else drawView();
+    resFetchAll();
   } catch (e) { RES.lg.busy = false; RES.lg.msg = e.message || 'Could not check. Try again.'; drawView(); }
 }
 document.addEventListener('input', e => {
@@ -267,33 +254,41 @@ document.addEventListener('submit', async e => {
   const f = e.target, fid = f.getAttribute('id'); if (fid !== 'res-look' && fid !== 'res-build' && fid !== 'res-login' && fid !== 'res-create') return;
   e.preventDefault(); const D = Object.fromEntries(new FormData(f));
   if (fid === 'res-login' || fid === 'res-create') {
-    const ev = RES.events.find(x => x.id === RES.sel), g = RES.lg; if (!ev || g.busy) return;
-    g.sidIn = String(D.sid || '').slice(0, 30); if (fid === 'res-create') g.emailIn = String(D.email || '').slice(0, 80);
+    const g = RES.lg; if (g.busy) return;
+    g.schoolIn = String(D.school || '').slice(0, 80); g.sidIn = String(D.sid || '').slice(0, 30); if (fid === 'res-create') g.emailIn = String(D.email || '').slice(0, 80);
     const sid = Cloud.normSid(D.sid), fail = m => { g.msg = m; drawView(); const el = $('#rl-err'); if (el) el.focus && el.setAttribute('tabindex', '-1'); };
+    const school = Cloud.schoolId(D.school);
+    if (!school) return fail('Type your school’s name.');
     if (!sid) return fail('Enter your student ID.');
     if (fid === 'res-login') {
       if (lockLeft()) return; if (!D.pw) return fail('Enter your password.');
       g.busy = true; g.msg = ''; drawView();
-      try { RES.rs = await Cloud.resSignIn(ev.school, D.sid, D.pw); g.busy = false; noteAttempt(true);
+      try { RES.rs = await Cloud.resSignIn(school, D.sid, D.pw); g.busy = false; noteAttempt(true);
         if (!RES.rs.verified) { g.mode = 'verify'; g.email = RES.rs.email; g.demo = Cloud.mode !== 'firebase'; drawView(); return; }
-        resFetchLogin(ev); } catch (x) { g.busy = false; noteAttempt(false); fail(x.message || 'Could not log in.'); }
+        resFetchAll(); } catch (x) { g.busy = false; noteAttempt(false); fail(x.message || 'Could not log in.'); }
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(D.email).trim())) return fail('Enter your school email address.');
     if (!D.pw || D.pw.length < 8) return fail('Use at least 8 characters for your password.');
     if (D.pw !== D.pw2) return fail('The two passwords are not the same.');
     g.busy = true; g.msg = ''; drawView();
-    try { const r = await Cloud.resSignUp(ev.school, D.sid, D.email, D.pw); g.busy = false; g.email = r.email; g.demo = Cloud.mode !== 'firebase';
-      if (r.verified) { RES.rs = await Cloud.resSession(); g.mode = 'login'; resFetchLogin(ev); } else { g.mode = 'verify'; drawView(); } }
+    try { const r = await Cloud.resSignUp(school, D.sid, D.email, D.pw); g.busy = false; g.email = r.email; g.demo = Cloud.mode !== 'firebase';
+      if (r.verified) { RES.rs = await Cloud.resSession(); g.mode = 'login'; resFetchAll(); } else { g.mode = 'verify'; drawView(); } }
     catch (x) { g.busy = false; fail(x.message || 'Could not create your login.'); }
     return;
   }
   if (fid === 'res-look') {
-    const ev = RES.events.find(x => x.id === RES.sel); if (!ev || RES.busy || lockLeft()) return;
-    RES.busy = true; RES.out = null; drawView(); let rec = null, fail = '';
-    try { rec = await lookupResult(ev, D.name, D.sid, D.dob, ''); } catch (x) { fail = x.message || ''; }
-    RES.busy = false; if (!fail) noteAttempt(!!rec);
-    RES.out = rec ? { ok: 1, rec } : { ok: 0, old: 1, msg: fail || ('No result found for those details. Check the spelling of your name, your ID and your date of birth' + '' + '. If it still does not work, your result may not be published yet. Ask your PE teacher.') };
+    if (RES.busy || lockLeft()) return;
+    const g = RES.lg; g.schoolIn = String(D.school || '').slice(0, 80);
+    const school = Cloud.schoolId(D.school); if (!school) { RES.oldMsg = 'Type your school’s name.'; drawView(); return; }
+    RES.busy = true; RES.oldMsg = ''; RES.mine = null; drawView(); const out = []; let fail = '';
+    try {
+      const evs = (await Cloud.eventsList(school)).filter(e => e.kind === 'private');
+      for (const ev of evs) { const rec = await lookupResult(ev, D.name, D.sid, D.dob, ''); if (rec) out.push({ ev, rec }); }
+      if (!evs.length) fail = 'Your school has not published any results yet.';
+    } catch (x) { fail = x.message || 'Could not check. Try again.'; }
+    RES.busy = false; if (!fail) noteAttempt(!!out.length);
+    if (out.length) { RES.mine = out; RES.mineMsg = ''; } else RES.oldMsg = fail || 'No result found for those details. Check the spelling of your name, your ID and your date of birth. If it still does not work, your result may not be published yet. Ask your PE teacher.';
     drawView(); return;
   }
   if (RES.busyBuild) return; RES.busyBuild = true; RES.build = null;

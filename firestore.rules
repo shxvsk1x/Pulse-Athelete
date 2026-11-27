@@ -10,14 +10,30 @@ service cloud.firestore {
     function coachOf(school, sport) { return isCoach() && me().school == school && sport in me().sports; }
     function coachOfAny(school, sports) { return isCoach() && me().school == school && sports.hasAny(me().sports); }
 
-    // schools/{id} = { coachCode: '...' }. Created by the admin in the console. Nobody can read it from the app.
-    match /schools/{school} { allow read, write: if false; }
+    // schools/{id} = { coachCode, owner, name }. The first coach to set a school up creates it and picks the code.
+    // Only coaches of that school can read the code (to share it with colleagues). Nobody can change or delete it from the app.
+    match /schools/{school} {
+      allow get: if isCoach() && me().school == school;
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid
+        && request.resource.data.coachCode is string && request.resource.data.coachCode.size() >= 6 && request.resource.data.coachCode.size() <= 40
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80;
+      allow update, delete: if false;
+    }
+    // the public list of school names, so a student can pick theirs. Names only, never codes.
+    match /schoolDirectory/{school} {
+      allow get, list: if true;
+      allow create: if signedIn() && exists(/databases/$(database)/documents/schools/$(school))
+        && get(/databases/$(database)/documents/schools/$(school)).data.owner == request.auth.uid
+        && request.resource.data.keys().hasOnly(['name']) && request.resource.data.name is string && request.resource.data.name.size() <= 80;
+      allow update, delete: if false;
+    }
 
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      // students sign up freely; coaches need their school's access code
+      // students and trainers sign up freely; coaches need their school's access code
       allow create: if signedIn() && request.auth.uid == uid && (
-        request.resource.data.role == 'student' ||
+        request.resource.data.role == 'student' || request.resource.data.role == 'trainer' ||
         (request.resource.data.role == 'coach'
           && exists(/databases/$(database)/documents/schools/$(request.resource.data.school))
           && request.resource.data.coachCode == get(/databases/$(database)/documents/schools/$(request.resource.data.school)).data.coachCode));
@@ -80,6 +96,35 @@ service cloud.firestore {
     // what a student's accepted friends can see: consistency and progress, nothing about food or body weight
     match /friendFeed/{uid} {
       allow read: if signedIn() && (uid == request.auth.uid || friendsWith(uid));
+      allow create, update: if signedIn() && uid == request.auth.uid && me().role == 'student';
+      allow delete: if signedIn() && uid == request.auth.uid;
+    }
+
+    // personal trainers. A trainee shares a code, a trainer with a verified email enters it, and the trainee must accept.
+    // Only then can the trainer read the trainee's progress summary. Either side can end it at any time.
+    function linkedTrainer(traineeUid) {
+      return signedIn() && exists(/databases/$(database)/documents/trainerLinks/$(request.auth.uid + '_' + traineeUid))
+        && get(/databases/$(database)/documents/trainerLinks/$(request.auth.uid + '_' + traineeUid)).data.status == 'accepted';
+    }
+    match /trainerCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid && me().role == 'student';
+      allow update, delete: if signedIn() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid;
+    }
+    match /trainerLinks/{id} {
+      allow get, list: if signedIn() && (resource.data.trainer == request.auth.uid || resource.data.trainee == request.auth.uid);
+      allow create: if signedIn() && me().role == 'trainer' && request.auth.token.email_verified == true
+        && request.resource.data.trainer == request.auth.uid && request.resource.data.status == 'pending'
+        && request.resource.data.trainerEmail == request.auth.token.email
+        && id == request.auth.uid + '_' + request.resource.data.trainee;
+      allow update: if signedIn() && resource.data.trainee == request.auth.uid && request.resource.data.status == 'accepted'
+        && request.resource.data.trainer == resource.data.trainer && request.resource.data.trainee == resource.data.trainee
+        && request.resource.data.trainerEmail == resource.data.trainerEmail;
+      allow delete: if signedIn() && (resource.data.trainer == request.auth.uid || resource.data.trainee == request.auth.uid);
+    }
+    match /trainee/{uid} {
+      allow read: if signedIn() && (uid == request.auth.uid || linkedTrainer(uid));
       allow create, update: if signedIn() && uid == request.auth.uid && me().role == 'student';
       allow delete: if signedIn() && uid == request.auth.uid;
     }

@@ -1498,3 +1498,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; line-height
 .fr-strip i { height: 22px; border-radius: 5px; background: rgba(127,127,127,.18); }
 .fr-strip i.on { background: var(--accent, #c8ff3d); }
 .fr-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+
+.chk { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.4; cursor: pointer; margin: 4px 0 12px; }
+.chk input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--accent, #c8ff3d); flex: none; }
+.field[hidden], #a-gradebox[hidden] { display: none !important; }
