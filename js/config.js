@@ -6,7 +6,14 @@ window.PULSE_CONFIG = {
      Your apps → Web app → "SDK setup and configuration" → Config).
      While this is null, Pulse runs in demo mode: accounts and the coach view
      work, but only inside this one browser. */
-  firebase: null,
+  firebase: {
+    apiKey: 'AIzaSyBt9m6A6ih86w5PvkJflspXUPWV8HEy7yA',
+    authDomain: 'pulse-athlete.firebaseapp.com',
+    projectId: 'pulse-athlete',
+    storageBucket: 'pulse-athlete.firebasestorage.app',
+    messagingSenderId: '437805527132',
+    appId: '1:437805527132:web:f9c149d8e82663f7ce7699'
+  },
   // firebase: {
   //   apiKey: '...',
   //   authDomain: 'your-project.firebaseapp.com',
