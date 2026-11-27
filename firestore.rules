@@ -52,6 +52,38 @@ service cloud.firestore {
         && request.resource.data.by == request.auth.uid;
     }
 
+    // friends. A friend code is a short random code a student shares; anyone signed in can look one code up, but nobody can list them.
+    function pairId(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+    function friendsWith(uid) {
+      return signedIn() && exists(/databases/$(database)/documents/friendships/$(pairId(request.auth.uid, uid)))
+        && get(/databases/$(database)/documents/friendships/$(pairId(request.auth.uid, uid))).data.status == 'accepted';
+    }
+    match /friendCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid && me().role == 'student';
+      allow update, delete: if signedIn() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid;
+    }
+    // a friendship has two sides. Either asks, only the other side can accept, and either can end it.
+    match /friendships/{id} {
+      allow get, list: if signedIn() && (resource.data.a == request.auth.uid || resource.data.b == request.auth.uid);
+      allow create: if signedIn() && me().role == 'student'
+        && request.resource.data.from == request.auth.uid && request.resource.data.status == 'pending'
+        && request.resource.data.a != request.resource.data.b
+        && (request.resource.data.a == request.auth.uid || request.resource.data.b == request.auth.uid)
+        && id == pairId(request.resource.data.a, request.resource.data.b);
+      allow update: if signedIn() && (resource.data.a == request.auth.uid || resource.data.b == request.auth.uid)
+        && resource.data.from != request.auth.uid && request.resource.data.status == 'accepted'
+        && request.resource.data.a == resource.data.a && request.resource.data.b == resource.data.b && request.resource.data.from == resource.data.from;
+      allow delete: if signedIn() && (resource.data.a == request.auth.uid || resource.data.b == request.auth.uid);
+    }
+    // what a student's accepted friends can see: consistency and progress, nothing about food or body weight
+    match /friendFeed/{uid} {
+      allow read: if signedIn() && (uid == request.auth.uid || friendsWith(uid));
+      allow create, update: if signedIn() && uid == request.auth.uid && me().role == 'student';
+      allow delete: if signedIn() && uid == request.auth.uid;
+    }
+
     // school events. Titles, criteria and public winners are readable by anyone; only that school's coaches can write.
     match /events/{id} {
       allow read: if true;

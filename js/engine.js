@@ -261,12 +261,16 @@ function trainingDays(p) {
   if (p.days && p.days.length === n) return [...p.days].sort((a, b) => a - b);
   return DEFAULT_DAYS[n];
 }
-function phaseIndex(dateObj) {
-  const start = mondayOf(new Date(S.profile.createdAt));
-  const w = Math.floor((mondayOf(dateObj) - start) / (7 * 864e5));
-  return ((w % 4) + 4) % 4;
+/* The plan starts on the day the athlete begins, so week 1 of the block begins that day (not on the Monday before it). */
+function startOf(p) {
+  const x = p && p.startDate ? parseIso(p.startDate) : new Date((p && p.createdAt) || Date.now());
+  x.setHours(0, 0, 0, 0); return x;
 }
-function blockWeek(dateObj) { const start = mondayOf(new Date(S.profile.createdAt)); return Math.floor((mondayOf(dateObj) - start) / (7 * 864e5)); }
+const dayDiff = (a, b) => { const x = new Date(a), y = new Date(b); x.setHours(0, 0, 0, 0); y.setHours(0, 0, 0, 0); return Math.round((y - x) / 864e5); };
+function blockWeek(dateObj) { return Math.floor(dayDiff(startOf(S.profile), dateObj) / 7); }
+function phaseIndex(dateObj) { return ((blockWeek(dateObj) % 4) + 4) % 4; }
+/* first day of the 7-day plan week that contains dateObj */
+function weekStart(dateObj) { return addDays(startOf(S.profile), 7 * blockWeek(dateObj)); }
 
 function buildSession(p, tKey, sIdx, phaseI, swaps = {}) {
   const T = TEMPLATES[tKey], sc = SCHEME[p.goal], ph = PHASES[phaseI];

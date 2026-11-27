@@ -131,7 +131,7 @@ function toast(msg, opts = {}) {
 
 /* ---------- modal ---------- */
 let modalStack = [];
-function openModal({ title, sub = '', body = '', actions = [], onOpen, size, label }) {
+function openModal({ title, sub = '', body = '', actions = [], onOpen, onClose, size, label }) {
   const layer = $('#layer');
   const prev = document.activeElement;
   const scrim = document.createElement('div'); scrim.className = 'scrim';
@@ -148,6 +148,7 @@ function openModal({ title, sub = '', body = '', actions = [], onOpen, size, lab
     el: m,
     close() {
       if (api.closed) return; api.closed = true;
+      if (onClose) { try { onClose(); } catch (e) {} }
       scrim.classList.add('out'); m.classList.add('out');
       setTimeout(() => { scrim.remove(); m.remove(); }, 230);
       modalStack = modalStack.filter(x => x !== api);

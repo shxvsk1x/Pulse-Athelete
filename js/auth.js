@@ -117,6 +117,7 @@ async function signOut() {
   await Cloud.signOut();
   store.del('pulse.entry');
   Object.assign(COACH, { roster: [], pending: [], loaded: false, loading: false, err: '' });
+  Object.assign(FR, { loaded: false, loading: false, err: '', ships: [], feeds: {}, code: '', busy: false }); Sync.last = ''; Sync.lastFeed = '';
   REAL = S = null; UI.screen = null; UI.draft = null; stopRest();
   navigate('welcome');
   setTimeout(() => toast('Signed out.'), 300);
@@ -140,12 +141,12 @@ function accountCard() {
   if (!u) return `<div class="acct"><span class="acct-ic">${IC.user}</span><div><b>You are using Pulse as a guest</b><p>Your plan lives only in this browser. Create an account to keep it safe, use it on your phone and laptop, and let your coaches follow your progress.</p></div>
     <div class="acct-acts"><a class="btn btn-primary" href="#/signup">Create an account</a><a class="btn btn-ghost" href="#/login">Log in</a></div></div>`;
   return `<div class="acct"><span class="acct-ic acc">${esc(initials(u.name))}</span><div><b>${esc(u.name)}</b><p>${esc(u.email)} · ${esc(Cloud.schoolName(S.profile.school || u.school) || 'No school set')}${S.profile.grade ? ` · grade ${esc(S.profile.grade)}` : ''}</p></div>
-    <div class="acct-acts"><a class="btn btn-ghost" href="#/coach">${IC.coach}Coach access</a><button class="btn btn-quiet" data-act="sign-out">${IC.logout}Sign out</button></div></div>`;
+    <div class="acct-acts"><a class="btn btn-ghost" href="#/coach">${IC.coach}Coach access</a><a class="btn btn-ghost" href="#/friends">${IC.coach}Friends</a><button class="btn btn-quiet" data-act="sign-out">${IC.logout}Sign out</button></div></div>`;
 }
 
 /* ---------- sync ---------- */
 const Sync = {
-  t: null, last: '', failed: false,
+  t: null, last: '', lastFeed: '', failed: false,
   ok() { return Cloud.user && Cloud.user.role === 'student' && REAL && REAL.profile && !(S && S.sample); },
   schedule() { if (!this.ok()) return; clearTimeout(this.t); this.t = setTimeout(() => this.now(), 1500); },
   async now() {
@@ -155,6 +156,11 @@ const Sync = {
       await Cloud.saveState(REAL);
       const docs = progressDocs(REAL), key = JSON.stringify(docs);
       if (key !== this.last) { await Cloud.publishProgress(docs); this.last = key; }
+      if (REAL.friendsOn === true || REAL.friendsOn === false) {
+        const fd = REAL.friendsOn ? friendDoc(REAL) : { on: false, paused: true, name: String(REAL.profile.name || '').slice(0, 30), grade: String(REAL.profile.grade || '').slice(0, 3), updatedAt: Date.now() };
+        const fk = JSON.stringify(Object.assign({}, fd, { updatedAt: 0 }));
+        if (fk !== this.lastFeed) { await Cloud.publishFeed(fd); this.lastFeed = fk; }
+      }
       if (this.failed) toast('Back online. Everything is synced.');
       this.failed = false;
     } catch (e) {
@@ -184,6 +190,7 @@ function migrateState(st) {
   st.swaps = st.swaps || {}; st.glasses = st.glasses || []; st.supps = st.supps || []; st.mealSwaps = st.mealSwaps || {}; st.adjust = st.adjust || [];
   const p = st.profile;
   if (p && !Array.isArray(p.gear) && p.where !== 'gym') { p.gear = []; const map = { dumbbell: 'dumbbells', barbell: 'barbell', rack: 'squat-rack', bench: 'flat-bench', kettlebell: 'kettlebells', cable: 'cable-stack', machine: 'leg-press', pullup: 'pullup-bar', band: 'bands', box: 'plyo-box', medball: 'medball' }; (p.equip || []).forEach(k => { if (map[k]) p.gear.push(map[k]); if (k === 'machine') p.gear.push('lat-pulldown'); }); }
+  if (p && !p.startDate && p.createdAt) p.startDate = iso(mondayOf(new Date(p.createdAt)));   // plans made before start dates keep the weeks they already had
   if (p && p.where === 'gym' && !Array.isArray(p.gear)) p.gear = EQUIP.map(e => e.id);
   return st;
 }

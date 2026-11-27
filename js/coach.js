@@ -91,11 +91,38 @@ function adjustCard() {
   return `<section class="card c-12 adjust-card"><div class="weigh-in"><span class="wi-ic acc">${IC.target}</span><div style="min-width:0"><div class="label">Plan adjusted · ${fmtDate(parseIso(a.date))}</div><h3>Pulse tuned your plan</h3><p>${esc(a.text)}</p></div><button class="btn btn-ghost btn-sm" data-act="adjust-seen">Got it</button></div></section>`;
 }
 
+/* the detail coaches get on top of the summary: what was eaten, how sessions went, and what is safe to program */
+const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+function coachDetail(st, p) {
+  const days = [...Array(7)].map((_, i) => iso(addDays(new Date(), -i))), joined = iso(new Date(p.createdAt || Date.now()));
+  const eating = days.filter(d => d >= joined).map(d => {
+    const items = st.log.food[d] || [], t = sumFoods(items), tg = targets(p, !!sessionFor(parseIso(d)));
+    return {
+      date: d, kcal: Math.round(t.kcal), p: Math.round(t.p), c: Math.round(t.c), f: Math.round(t.f), tk: tg.kcal, tp: tg.protein, n: items.length,
+      items: items.slice(0, 14).map(it => { const f = it.custom || FOODS[it.id]; return f ? { n: clip(it.custom ? it.custom.name : f[0], 40), s: it.s || 1, m: clip(it.meal, 10), off: it.off ? 1 : 0, v: it.v || '' } : null; }).filter(Boolean)
+    };
+  }).filter(e => e.n || e.date === today());
+  const from14 = iso(addDays(new Date(), -13)), off = offPlanItems(from14, today());
+  const offTally = {}; off.forEach(it => { const k = clip(it.custom.name, 40); (offTally[k] = offTally[k] || { n: k, times: 0, v: it.v || '', kcal: Math.round(it.custom.kcal * (it.s || 1)) }).times++; });
+  const recent = st.log.sessions.filter(x => x.date >= iso(addDays(new Date(), -28))).slice(-10).reverse();
+  const sessions = recent.map((x, i) => {
+    const ts = timingStats(x);
+    return {
+      date: x.date, name: clip(x.name, 40), mins: x.mins, rpe: x.rpe, done: x.done, total: x.total, kg: Object.fromEntries(Object.entries(x.kg || {}).slice(0, 8).map(([k, v]) => [clip(k, 40), v])),
+      timing: ts ? { sets: ts.sets, avg: ts.avg, avgRest: ts.avgRest, short: ts.short, rushed: !!ts.rushed } : null,
+      sets: i < 4 ? (x.setLog || []).slice(0, 30).map(r => [clip(r.n, 40), r.set, r.of, r.sec, r.min]) : null
+    };
+  });
+  return {
+    eating, offPlan: { count: off.length, top: Object.values(offTally).sort((a, b) => b.times - a.times).slice(0, 6), avoid: off.filter(it => it.v === 'avoid').length },
+    sessions, health: { diet: p.diet || '', allergies: clip(p.allergies, 120), injuries: clip(p.injuries, 160), exp: p.exp || '', sessionsWk: p.sessions || null }
+  };
+}
 /* ---------------- what coaches see ---------------- */
 function progressDocs(st) {
   const prev = S; S = st;
   try {
-    const p = st.profile, planned = trainingDays(p).length, mon = mondayOf(new Date());
+    const p = st.profile, planned = trainingDays(p).length, mon = weekStart(new Date());
     const weeks = [3, 2, 1, 0].map(k => { const m = addDays(mon, -7 * k); return { label: fmtDate(m), done: weekDone(m) }; });
     const since28 = iso(addDays(new Date(), -28)), done28 = st.log.sessions.filter(s => s.date >= since28).length;
     const recent = st.log.sessions.slice(-6), avgRpe = recent.length ? round(recent.reduce((t, s) => t + s.rpe, 0) / recent.length, 1) : null;
@@ -113,8 +140,14 @@ function progressDocs(st) {
     if (rd.length >= 3 && rd.reduce((a, b) => a + b, 0) / rd.length < 45) flags.push('Low readiness');
     const wp = avg(waterPct); if (wp != null && wp < 70) flags.push('Not drinking enough water');
     const pp = avg(protDays); if (pp != null && protDays.length >= 3 && pp < 70) flags.push('Low protein');
+    const detail = coachDetail(st, p);
+    if (detail.offPlan.avoid >= 3) flags.push('Off-plan junk food repeatedly');
+    const fed = detail.eating.filter(e => e.n && e.date !== today());
+    if (fed.length >= 3 && fed.reduce((t, e) => t + e.kcal / e.tk, 0) / fed.length < 0.7) flags.push('Eating well below target');
+    if (detail.sessions.slice(0, 4).filter(x => x.timing && x.timing.rushed).length >= 2) flags.push('Rushing through sets');
     const adj = (st.adjust || [])[(st.adjust || []).length - 1];
     const base = {
+      detail,
       name: p.name, grade: p.grade || '', school: p.school, sports: p.sports.length ? p.sports : ['general'], goal: p.goal, age: p.age, planned,
       weeks, adherence: Math.min(100, Math.round(done28 / (planned * 4) * 100)), streak: weekStreak(), lastSession: (st.log.sessions[st.log.sessions.length - 1] || {}).date || '', avgRpe,
       weight: { now: lw ? lw.kg : p.weight, lastDate: lw ? lw.date : '', status: ps.status, rate: ps.t ? round(ps.t.pctWeek, 2) : null, kgWeek: ps.t ? round(ps.t.kgWeek, 2) : null, series: st.log.weight.slice(-10).map(x => [x.date, x.kg]) },
@@ -160,15 +193,16 @@ VIEWS.coach = () => {
       <section class="card c-12">${top}</section>
       <section class="card c-7"><div class="card-h"><h3>What your coaches see</h3><span class="label">Live preview</span></div><div class="card-b">${studentCard(preview)}</div></section>
       <section class="card c-5"><div class="card-h"><h3>What stays private</h3></div><div class="card-b"><ul class="priv">
-        ${[['Shared', 'Sessions done each week and how hard they felt', 1], ['Shared', 'Your weigh-in trend against your goal', 1], ['Shared', 'Water, protein and readiness as percentages', 1], ['Shared', 'Supplements and doctor’s notes you send for checking', 1], ['Private', 'Your food log and meal plan', 0], ['Private', 'Your exercises, weights and injury notes', 0], ['Private', 'Your glass photos and chat with Ask Pulse', 0]].map(([a, b, on]) => `<li class="${on ? 'on' : ''}"><span>${on ? IC.check : IC.lock}</span>${esc(b)}</li>`).join('')}</ul></div></section>
+        ${[['Shared', 'Sessions done each week, how hard they felt and which exercises, weights and set times you logged', 1], ['Shared', 'Your weigh-in trend against your goal', 1], ['Shared', 'Last 7 days of food: calories, macros, meals and anything you ate off plan, with how Pulse rated it', 1], ['Shared', 'Allergies, injuries and diet, so coaches can keep you safe', 1], ['Shared', 'Water, protein and readiness as percentages', 1], ['Shared', 'Supplements and doctor’s notes you send for checking', 1], ['Private', 'Your glass photos and your chats with Ask Pulse', 0], ['Private', 'Your friends and what you share with them', 0]].map(([a, b, on]) => `<li class="${on ? 'on' : ''}"><span>${on ? IC.check : IC.lock}</span>${esc(b)}</li>`).join('')}</ul></div></section>
       <section class="card c-6"><div class="card-h"><h3>Supplement checks</h3><a class="btn btn-quiet btn-sm" href="#/fuel">Fuel ${IC.arrow}</a></div><div class="card-b">${pend.length ? `<ul class="supp-list">${pend.map(x => { const [k, l] = SUPP_STATUS[x.status] || ['', x.status]; return `<li><span class="supp-ic">${IC.pill}</span><div><div class="nm">${esc(x.name)}</div><div class="mac">${x.review ? `${x.status === 'active' ? 'Verified' : 'Declined'} by ${esc(x.review.byName)}${x.review.comment ? ' · “' + esc(x.review.comment) + '”' : ''}` : x.sentAt ? 'Sent ' + fmtDate(new Date(x.sentAt)) : 'Not sent yet'}</div></div><span class="pill ${k}">${l}</span></li>`; }).join('')}</ul>` : `<p class="muted" style="font-size:13.5px">Nothing waiting. If you are under 18, supplements that can have side effects need a doctor’s note, and one of your coaches checks it here.</p>`}</div></section>
       <section class="card c-6"><div class="card-h"><h3>Weekly weigh-ins</h3><span class="label">${(S.adjust || []).length} adjustments</span></div><div class="card-b">${(() => { const ps = progressStatus(), [k, l] = statusFor(p.goal, ps.status), lw = lastWeighIn(); return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><span class="pill ${k}">${l}</span><span class="muted" style="font-size:13px">${lw ? 'Last weigh-in ' + fmtDate(parseIso(lw.date)) : 'No weigh-ins yet'}${ps.t ? ` · ${ps.t.kgWeek >= 0 ? '+' : ''}${fmt1(ps.t.kgWeek)} kg a week` : ''}</span></div>`; })()}
         ${(S.adjust || []).length ? `<ul class="hist">${S.adjust.slice(-3).reverse().map(a => `<li style="grid-template-columns:44px minmax(0,1fr)"><div class="dte"><b>${parseIso(a.date).getDate()}</b><span>${parseIso(a.date).toLocaleDateString('en', { month: 'short' })}</span></div><div class="sub" style="font-size:13px;color:var(--ink-2)">${esc(a.text)}</div></li>`).join('')}</ul>` : `<p class="muted" style="font-size:13.5px">Weigh in once a week. If your weight stops moving towards your goal, Pulse adjusts your food targets and tells you and your coaches what changed.</p>`}</div></section>
+      ${preview.detail ? `<div class="c-12" style="grid-column:1/-1"><div class="label" style="margin:8px 0">Also shared with your coaches</div></div>${coachDetailCards(preview)}` : ''}
     </div>`;
 };
 function progressDocsPreview() {
   const p = S.profile;
-  return { name: p.name, grade: p.grade || '', sports: p.sports.length ? p.sports : ['general'], goal: p.goal, planned: trainingDays(p).length, weeks: [{ done: weekDone(mondayOf(new Date())) }], adherence: 0, weight: { now: p.weight, status: 'no-data', kgWeek: null, lastDate: '' }, water: null, flags: [], supps: [] };
+  return { name: p.name, grade: p.grade || '', sports: p.sports.length ? p.sports : ['general'], goal: p.goal, planned: trainingDays(p).length, weeks: [{ done: weekDone(weekStart(new Date())) }], adherence: 0, weight: { now: p.weight, status: 'no-data', kgWeek: null, lastDate: '' }, water: null, flags: [], supps: [] };
 }
 
 /* ---------------- coach dashboard ---------------- */
@@ -267,8 +301,30 @@ function coachStudent() {
       <section class="card c-6"><div class="card-h"><h3>Flags and supplements</h3></div><div class="card-b">
         <div class="stu-flags" style="margin:0 0 14px">${d.flags.length ? d.flags.map(f => `<span class="pill warn">${esc(f)}</span>`).join('') : `<span class="pill good">No concerns</span>`}</div>
         ${d.supps.length ? `<ul class="supp-list">${d.supps.map(s => { const p = pend.find(x => x.s.id === s.id), st = p && p.review ? (p.review.decision === 'approve' ? ['good', 'Verified by ' + p.review.byName] : ['bad', 'Declined by ' + p.review.byName]) : SUPP_STATUS[s.status]; return `<li><span class="supp-ic">${IC.pill}</span><div><div class="nm">${esc(s.name)}</div></div><span class="pill ${st[0]}">${esc(st[1])}</span>${p && !p.review ? `<button class="btn btn-primary btn-sm" data-act="coach-review" data-id="${s.id}">Review note</button>` : ''}</li>`; }).join('')}</ul>` : '<p class="muted" style="font-size:13.5px">No supplements.</p>'}</div></section>
-      <p class="muted c-12" style="font-size:12.5px">Coaches see progress summaries only. ${esc(d.name)}’s food log, meal plan and exercise details stay private. Updated ${fmtDate(new Date(d.updatedAt))}.</p>
+      ${d.detail ? coachDetailCards(d) : ''}
+      <p class="muted c-12" style="font-size:12.5px">${esc(d.name)}’s Ask Pulse chats and glass photos are private. Updated ${fmtDate(new Date(d.updatedAt))}.</p>
     </div>`;
+}
+function coachDetailCards(d) {
+  const x = d.detail, h = x.health;
+  const vp = { good: ['good', 'Good choice'], ok: ['', 'Fine now and then'], avoid: ['bad', 'Rated avoid'] };
+  const eat = x.eating.map(e => {
+    const pct = e.tk ? Math.round(e.kcal / e.tk * 100) : 0;
+    return `<details class="tl-day"><summary><div class="dte"><b>${parseIso(e.date).getDate()}</b><span>${parseIso(e.date).toLocaleDateString('en', { month: 'short' })}</span></div>
+      <div style="min-width:0"><b>${e.n ? `${e.kcal} kcal · ${pct}% of target` : 'Nothing logged'}</b><span class="muted" style="font-size:12.5px;display:block">${e.n ? `Protein ${e.p} g of ${e.tp} g · carbs ${e.c} g · fat ${e.f} g` : 'No food logged this day'}</span></div></summary>
+      ${e.items.length ? `<ul class="supp-list" style="margin-top:8px">${e.items.map(it => `<li><div style="min-width:0"><div class="nm">${esc(it.n)}${it.s !== 1 ? ' × ' + fmt1(it.s) : ''}</div><div class="mac">${esc(it.m || 'Meal')}</div></div>${it.off ? `<span class="pill ${(vp[it.v] || ['', 'Off plan'])[0]}">Off plan${it.v ? ' · ' + (vp[it.v] || ['', ''])[1] : ''}</span>` : ''}</li>`).join('')}</ul>` : ''}</details>`;
+  }).join('');
+  const off = x.offPlan.count ? `<p class="muted" style="font-size:13px;margin:12px 0 6px">${x.offPlan.count} off-plan ${x.offPlan.count === 1 ? 'item' : 'items'} in 14 days${x.offPlan.avoid ? `, ${x.offPlan.avoid} rated avoid` : ''}.</p><div class="stu-flags" style="margin:0">${x.offPlan.top.map(t => `<span class="pill ${(vp[t.v] || ['', ''])[0]}">${esc(t.n)}${t.times > 1 ? ' × ' + t.times : ''}</span>`).join('')}</div>` : '';
+  const ses = x.sessions.length ? x.sessions.map(s => {
+    const t = s.timing, dt = parseIso(s.date);
+    return `<details class="tl-day"><summary><div class="dte"><b>${dt.getDate()}</b><span>${dt.toLocaleDateString('en', { month: 'short' })}</span></div>
+      <div style="min-width:0"><b>${esc(s.name)}</b><span class="muted" style="font-size:12.5px;display:block">${s.done}/${s.total} sets · ${s.mins} min · RPE ${s.rpe}${t ? ` · avg set ${t.avg}s` : ' · sets not timed'}</span></div>${t ? `<span class="pill ${t.rushed ? 'warn' : 'good'}">${t.rushed ? 'Looks rushed' : 'Real work'}</span>` : ''}</summary>
+      ${Object.keys(s.kg).length ? `<p class="muted" style="font-size:13px;margin:8px 0">Weights: ${Object.entries(s.kg).map(([n, v]) => esc(n) + ' ' + v + ' kg').join(' · ')}</p>` : ''}
+      ${s.sets ? `<div class="tl-rows">${s.sets.map(r => `<div class="tl-row ${r[3] < r[4] ? 'short' : ''}"><span>${esc(r[0])} · set ${r[1]}/${r[2]}</span><b>${r[3]} s</b></div>`).join('')}</div>` : ''}</details>`;
+  }).join('') : '<p class="muted">No sessions in the last 4 weeks.</p>';
+  return `<section class="card c-7"><div class="card-h"><h3>What they ate</h3><span class="label">Last 7 days</span></div><div class="card-b">${eat || '<p class="muted">Nothing yet.</p>'}${off}</div></section>
+    <section class="card c-5"><div class="card-h"><h3>Health and safety</h3></div><div class="card-b"><dl class="kv" style="padding-top:0">${[['Diet', h.diet ? (DIET_LABEL[h.diet] || h.diet) : 'Not set'], ['Allergies', h.allergies || 'None listed'], ['Injuries', h.injuries || 'None listed'], ['Experience', { beg: 'Beginner', int: 'Intermediate', adv: 'Advanced' }[h.exp] || '–'], ['Planned sessions', h.sessionsWk ? h.sessionsWk + ' a week' : '–']].map(([a, b]) => `<div><span>${a}</span><b>${esc(b)}</b></div>`).join('')}</dl></div></section>
+    <section class="card c-12"><div class="card-h"><h3>Recent sessions</h3><span class="label">Tap one for set times</span></div><div class="card-b">${ses}</div></section>`;
 }
 function coachVerify() {
   const open = COACH.pending.filter(x => !x.review), done = COACH.pending.filter(x => x.review);
@@ -284,7 +340,7 @@ function coachAccount() {
       <section class="card c-5"><div class="card-h"><h3>Account</h3></div><div class="card-b settings">
         <div class="set-row"><div><b>Appearance</b><span>Light or dark</span></div><button class="btn btn-ghost btn-sm" data-act="theme">${isDark() ? IC.sun : IC.moon}Switch</button></div>
         <div class="set-row"><div><b>Sign out</b><span>On this device</span></div><button class="btn btn-ghost btn-sm" data-act="sign-out">${IC.logout}Sign out</button></div></div></section>
-      <p class="muted c-12" style="font-size:12.5px;max-width:60em">You see progress summaries for students at your school who play a sport you coach. Their food logs, meal plans and exercise details are not shared. Verifying a doctor’s note confirms you have seen a genuine note; it is not medical advice.</p></div>`;
+      <p class="muted c-12" style="font-size:12.5px;max-width:60em">You see progress summaries for students at your school who play a sport you coach. Their Ask Pulse chats and photos are not shared. Verifying a doctor’s note confirms you have seen a genuine note; it is not medical advice.</p></div>`;
 }
 function reviewModal(id) {
   const x = COACH.pending.find(p => p.s.id === id); if (!x) return;

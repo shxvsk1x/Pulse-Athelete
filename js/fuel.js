@@ -145,7 +145,7 @@ VIEWS.fuel = () => {
       <section class="c-12"><div class="sec-row"><div><h3 class="h-sec">Your meal plan</h3><p class="muted" style="font-size:13.5px">Built for <b>${GOALS[p.goal].label.toLowerCase()}</b> and sized to your ${fmtN(t.kcal)} kcal. Not feeling one? Swap it as many times as you like.</p></div></div>
         <div class="meal-grid">${['Breakfast', 'Lunch', 'Snack', 'Dinner'].map(m => mealCard(p, ds, m, items)).join('')}</div></section>
       <section class="card c-7"><div class="card-h"><h3>Logged ${ds === today() ? 'today' : label.toLowerCase()}</h3><span class="label">${plural(items.length, 'item')}</span></div>
-        <div class="card-b">${items.length ? `<div>${['Breakfast', 'Lunch', 'Snack', 'Dinner', 'Other'].map(m => { const its = items.map((it, i) => ({ it, i })).filter(x => (x.it.meal || 'Other') === m); return its.length ? `<div class="label" style="margin:14px 0 2px">${m}</div>` + its.map(({ it, i }) => { const f = itemInfo(it); if (!f) return ''; const s = it.s || 1; return `<div class="log-item"><div style="min-width:0"><div class="nm">${esc(f.name)}</div><div class="mac">${fmtN(f.kcal * s)} kcal · P ${fmt1(f.p * s)} · C ${fmt1(f.c * s)} · F ${fmt1(f.f * s)}</div></div>
+        <div class="card-b">${offPlanSummary(ds)}${items.length ? `<div>${['Breakfast', 'Lunch', 'Snack', 'Dinner', 'Other'].map(m => { const its = items.map((it, i) => ({ it, i })).filter(x => (x.it.meal || 'Other') === m); return its.length ? `<div class="label" style="margin:14px 0 2px">${m}</div>` + its.map(({ it, i }) => { const f = itemInfo(it); if (!f) return ''; const s = it.s || 1; return `<div class="log-item"><div style="min-width:0"><div class="nm">${esc(f.name)}${it.off ? ` <span class="pill ${LV_UI[it.v || 'ok'][0]}" style="height:20px" title="${esc(it.why || '')}">${{ good: 'Good choice', ok: 'Okay', avoid: 'Skip next time' }[it.v || 'ok']}</span>` : ''}</div><div class="mac">${fmtN(f.kcal * s)} kcal · P ${fmt1(f.p * s)} · C ${fmt1(f.c * s)} · F ${fmt1(f.f * s)}</div></div>
           <div class="stepper"><button data-act="serv" data-i="${i}" data-v="-0.5" aria-label="Less of ${esc(f.name)}">${IC.minus}</button><span>×${fmt1(s)}</span><button data-act="serv" data-i="${i}" data-v="0.5" aria-label="More of ${esc(f.name)}">${IC.plus}</button></div>
           <button class="icon-btn sm" data-act="food-del" data-i="${i}" aria-label="Remove ${esc(f.name)}">${IC.x}</button></div>`; }).join('') : ''; }).join('')}</div>`
           : `<div class="empty" style="padding:28px 8px"><div class="glyph">${IC.fuel}</div><h4>Nothing logged ${ds === today() ? 'yet' : 'for this day'}</h4><p>Log a meal from your plan above in one tap, or search for a food.</p></div>`}</div></section>
@@ -169,7 +169,7 @@ function mealCard(p, ds, meal, items) {
 /* ---------- add food, with the junk-food guard ---------- */
 function foodSearchCard() {
   const r = foodResults(), p = S.profile, q = UI.foodQ.trim(), j = q.length > 2 ? junkCheck(q) : null;
-  return `<div class="card-h"><h3>Add food</h3><button class="btn btn-quiet btn-sm" data-act="custom-food">${IC.plus}Custom</button></div>
+  return `<div class="card-h"><h3>Add food</h3><button class="btn btn-primary btn-sm" data-act="off-plan">${IC.plus}I ate something else</button></div>
     <div class="card-b"><div class="input-wrap has-ic">${IC.search.replace('<svg', '<svg class="prefix-ic"')}<input class="input" type="search" id="food-q" placeholder="Search ${Object.keys(FOODS).length} healthy foods" value="${esc(UI.foodQ)}" aria-label="Search foods" autocomplete="off"></div>
       <div class="toolbar">${[['all', 'All'], ['protein', 'High protein'], ['carbs', 'Carbs'], ['light', 'Light']].map(([v, l]) => `<button class="chip" data-act="food-filter" data-v="${v}" aria-pressed="${UI.foodFilter === v}">${l}</button>`).join('')}
         <select class="input" id="food-sort" aria-label="Sort foods">${[['match', 'Best match'], ['protein', 'Most protein'], ['kcal', 'Fewest kcal'], ['az', 'A to Z']].map(([v, l]) => `<option value="${v}" ${UI.foodSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -182,48 +182,12 @@ function junkPanel(j, name) {
   return `<div class="junk"><div class="junk-h">${IC.ban}<b>${esc(cap(name))} is not on your plan</b></div>
     <p><b>Why:</b> ${esc(j.why)} ${esc(GOAL_HARM[p.goal])}</p>
     <p><b>What it does:</b> ${esc(j.fx)}</p>
-    <div class="junk-alt"><div><span class="label">Try this instead</span><div class="nm">${esc(f[0])}</div><div class="mac">${esc(f[1])} · ${foodMac(f)}</div></div><button class="btn btn-accent btn-sm" data-act="junk-alt" data-id="${alt}">${IC.plus}Add ${esc(f[0].split(',')[0].toLowerCase())}</button></div></div>`;
+    <div class="junk-alt"><div><span class="label">Try this instead</span><div class="nm">${esc(f[0])}</div><div class="mac">${esc(f[1])} · ${foodMac(f)}</div></div><button class="btn btn-accent btn-sm" data-act="junk-alt" data-id="${alt}">${IC.plus}Add ${esc(f[0].split(',')[0].toLowerCase())}</button></div>
+    <button class="btn btn-ghost btn-sm" data-act="off-plan" style="justify-self:start">I already ate it: log it honestly</button></div>`;
 }
 const cap = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
-function junkModal(j, name) {
-  const p = S.profile, alt = junkAlt(j, p), f = FOODS[alt];
-  openModal({
-    title: `${esc(cap(name))} can’t go in your log`, sub: 'Pulse only tracks food that moves you towards your goal.',
-    body: `<div class="junk" style="margin:0"><p><b>Why:</b> ${esc(j.why)} ${esc(GOAL_HARM[p.goal])}</p><p><b>What it does:</b> ${esc(j.fx)}</p>
-      <div class="junk-alt"><div><span class="label">A better choice</span><div class="nm">${esc(f[0])}</div><div class="mac">${esc(f[1])} · ${foodMac(f)}</div></div></div></div>`,
-    actions: [{ label: 'No thanks' }, { label: `Add ${esc(f[0].split(',')[0].toLowerCase())} instead`, kind: 'btn-primary', fn: () => { addFood(alt); UI.foodQ = ''; refresh(); toast(`Added <b>${esc(f[0])}</b>. Good swap.`); } }]
-  });
-}
-function customFoodModal() {
-  const nf = (k, l, s, ph) => `<div class="field" data-field="${k}"><label for="cf-${k}">${l}</label><div class="input-wrap"><input class="input num" id="cf-${k}" type="number" inputmode="decimal" min="0" step="1" placeholder="${ph}"><span class="suffix">${s}</span></div></div>`;
-  const pre = UI.foodQ.trim(), j0 = pre && junkCheck(pre);
-  if (j0) return junkModal(j0, pre);
-  openModal({
-    title: 'Add a custom food', sub: 'For healthy food that is not in the list. Check the label, or a rough guess is fine.',
-    body: `<div style="display:grid;gap:16px"><div class="field" data-field="name"><label for="cf-name">Name</label><input class="input" id="cf-name" type="text" maxlength="40" placeholder="e.g. Mum’s aloo paratha" value="${esc(pre)}" autofocus></div>
-      <div class="grid-2">${nf('kcal', 'Calories', 'kcal', '300')}${nf('p', 'Protein', 'g', '10')}${nf('c', 'Carbs', 'g', '40')}${nf('f', 'Fat', 'g', '10')}${nf('sug', 'Of which sugar', 'g', '5')}</div></div>`,
-    actions: [{ label: 'Cancel' }, { label: 'Add food', kind: 'btn-primary', fn: (api) => {
-      const m = api.el, g = k => m.querySelector('#cf-' + k).value.trim();
-      $$('.field', m).forEach(f => { f.classList.remove('err'); const e = f.querySelector('.error'); e && e.remove(); });
-      const j = junkCheck(g('name'));
-      if (j) { setTimeout(() => junkModal(j, g('name')), 240); return; }
-      const errs = {};
-      if (!g('name')) errs.name = 'Give it a name.';
-      if (g('kcal') === '' || +g('kcal') < 0 || +g('kcal') > 3000) errs.kcal = 'Enter 0 to 3000.';
-      ['p', 'c', 'f', 'sug'].forEach(k => { if (g(k) !== '' && (+g(k) < 0 || +g(k) > 300)) errs[k] = '0 to 300 g.'; });
-      if (Object.keys(errs).length) { Object.entries(errs).forEach(([k, msg]) => { const f = m.querySelector(`[data-field="${k}"]`); f.classList.add('err'); f.insertAdjacentHTML('beforeend', `<span class="error">${IC.alert}${msg}</span>`); }); m.querySelector('.field.err input').focus(); return false; }
-      // label check: mostly sugar, or very fatty with almost no protein, is treated as junk
-      const kc = +g('kcal'), sug = +g('sug') || 0, pr = +g('p') || 0, fat = +g('f') || 0;
-      if ((sug * 4 > kc * 0.3 && sug >= 12) || (kc >= 200 && fat * 9 > kc * 0.55 && pr * 4 < kc * 0.08)) {
-        const fake = { why: sug * 4 > kc * 0.3 ? `About ${Math.round(sug * 4 / kc * 100)}% of its calories come from sugar.` : 'Most of its calories come from fat, with almost no protein.', fx: 'Foods like this fill you up with energy your muscles cannot use, and make it harder to hit your protein.', alt: ['fruitbowl', 'greek', 'roastedchana', 'makhana'] };
-        setTimeout(() => junkModal(fake, g('name')), 240); return;
-      }
-      const ds = UI.fuelDate || today(), arr = S.log.food[ds] || (S.log.food[ds] = []);
-      arr.push({ custom: { name: g('name'), kcal: kc, p: pr, c: +g('c') || 0, f: fat }, s: 1, meal: ds === today() ? mealNow() : 'Other' });
-      save(); UI.foodQ = ''; refresh(); toast(`Added <b>${esc(g('name'))}</b>.`);
-    } }]
-  });
-}
+function junkModal(j, name) { foodCheckModal(name); }
+function customFoodModal() { foodCheckModal(UI.foodQ.trim()); }
 
 /* ---------------- SUPPLEMENTS ---------------- */
 const SUPP_STATUS = {
