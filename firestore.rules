@@ -8,12 +8,17 @@ service cloud.firestore {
     function isCoach() { return signedIn() && exists(meDoc()) && me().role == 'coach'; }
     // a coach may see a student only if they share a school and the coach coaches that sport
     function coachOf(school, sport) { return isCoach() && me().school == school && sport in me().sports; }
+    // admins are added by hand in the console: admins/{uid} with any field. Nobody can create one from the app.
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
     function coachOfAny(school, sports) { return isCoach() && me().school == school && sports.hasAny(me().sports); }
 
     // schools/{id} = { coachCode, owner, name }. The first coach to set a school up creates it and picks the code.
     // Only coaches of that school can read the code (to share it with colleagues). Nobody can change or delete it from the app.
+    match /admins/{uid} { allow get: if signedIn() && request.auth.uid == uid; allow list, write: if false; }
     match /schools/{school} {
       allow get: if isCoach() && me().school == school;
+      allow get, list: if isAdmin();
+      allow update: if isAdmin() && request.resource.data.owner == resource.data.owner;
       allow list: if false;
       allow create: if signedIn() && request.resource.data.owner == request.auth.uid
         && request.resource.data.coachCode is string && request.resource.data.coachCode.size() >= 6 && request.resource.data.coachCode.size() <= 40
@@ -31,10 +36,12 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
+      allow list: if isAdmin();
       // students and trainers sign up freely; coaches need their school's access code
       allow create: if signedIn() && request.auth.uid == uid && (
         request.resource.data.role == 'student' || request.resource.data.role == 'trainer' ||
         (request.resource.data.role == 'coach'
+          && !get(/databases/$(database)/documents/schools/$(request.resource.data.school)).data.get('suspended', false)
           && exists(/databases/$(database)/documents/schools/$(request.resource.data.school))
           && request.resource.data.coachCode == get(/databases/$(database)/documents/schools/$(request.resource.data.school)).data.coachCode));
       // nobody can change their own role; coaches cannot switch school
@@ -50,7 +57,8 @@ service cloud.firestore {
     match /progress/{id} {
       allow read: if signedIn() && (resource.data.uid == request.auth.uid || coachOf(resource.data.school, resource.data.sport));
       allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid
-        && id.matches(request.auth.uid + '_.*') && me().role == 'student';
+        && id.matches(request.auth.uid + '_.*') && me().role == 'student'
+        && (!(request.resource.data.age is number) || request.resource.data.age >= 18 || request.resource.data.get('consent', null) != null);
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
@@ -157,6 +165,51 @@ service cloud.firestore {
       allow list: if isCoach() && resource.data.school == me().school;
       allow create, update: if isCoach() && request.resource.data.school == me().school;
       allow delete: if isCoach() && resource.data.school == me().school;
+    }
+
+    // reports: anyone signed in can file one about a message, person or entry; only the reporter and admins can read it
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.by == request.auth.uid && request.resource.data.text is string && request.resource.data.text.size() <= 800;
+      allow get: if signedIn() && resource.data.by == request.auth.uid;
+      allow get, list: if isAdmin();
+      allow update: if isAdmin();
+    }
+    // coach <-> student messages, same school only
+    match /messages/{id} {
+      allow create: if signedIn() && request.resource.data.from == request.auth.uid && exists(meDoc())
+        && request.resource.data.school == me().school && request.resource.data.text is string && request.resource.data.text.size() <= 600
+        && (me().role == 'coach' || me().role == 'student');
+      allow get, list: if signedIn() && (resource.data.to == request.auth.uid || resource.data.from == request.auth.uid);
+      // the recipient can mark it read, nothing else
+      allow update: if signedIn() && resource.data.to == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if signedIn() && (resource.data.to == request.auth.uid || resource.data.from == request.auth.uid);
+    }
+    // leaderboard. A student claims a lift; a coach at the same school verifies it; only then does it reach the board.
+    match /lifts/{id} {
+      allow create: if signedIn() && me().role == 'student' && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending' && request.resource.data.school == me().school;
+      allow get, list: if signedIn() && (resource.data.uid == request.auth.uid || (isCoach() && me().school == resource.data.school));
+      // a coach decides it; the student can only switch their own consent
+      allow update: if signedIn() && ((isCoach() && me().school == resource.data.school && request.resource.data.uid == resource.data.uid)
+        || (resource.data.uid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consent'])));
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+    // the proof link (video): the student and their school's coaches only. Never shown on the board.
+    match /liftProof/{id} {
+      allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid && request.resource.data.url is string && request.resource.data.url.size() <= 300;
+      allow get: if signedIn() && (resource.data.uid == request.auth.uid || (isCoach() && me().school == resource.data.school));
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+    // board entries: name, school, grade, weight. A coach adds one at verification; the student can re-post their own verified lift or remove it.
+    match /board/{id} {
+      allow get, list: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.consent == true && (
+        (isCoach() && me().school == request.resource.data.school && request.resource.data.verifiedBy == request.auth.uid)
+        || (request.resource.data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/lifts/$(request.resource.data.liftId)).data.status == 'verified'
+          && get(/databases/$(database)/documents/lifts/$(request.resource.data.liftId)).data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/lifts/$(request.resource.data.liftId)).data.kg == request.resource.data.kg));
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /results/{id} {

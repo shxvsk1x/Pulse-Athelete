@@ -45,6 +45,12 @@ const Cloud = (() => {
   /* ---------------- LOCAL (demo) backend ---------------- */
   const L = {
     db() { const d = lsGet('pulse.cloud') || { users: {}, progress: {}, notes: {}, reviews: {} }; d.events = d.events || {}; d.results = d.results || {}; d.friends = d.friends || { codes: {}, ships: {}, feed: {} }; d.rlog = d.rlog || { logins: {}, rows: {} }; d.dir = d.dir || {}; d.schools = d.schools || {}; d.trn = d.trn || { codes: {}, links: {}, feed: {} }; return d; },
+    /* generic documents for newer features: reports, messages, lifts, board, admins */
+    gdb() { const d = L.db(); d.gen = d.gen || {}; return d; },
+    async gput(col, id, data, merge) { const db = L.gdb(), k = col + '/' + id; db.gen[k] = merge ? Object.assign({}, db.gen[k], data) : Object.assign({}, data); L.put(db); },
+    async gget(col, id) { const v = L.gdb().gen[col + '/' + id]; return v ? Object.assign({ id }, v) : null; },
+    async gdel(col, id) { const db = L.gdb(); delete db.gen[col + '/' + id]; L.put(db); },
+    async gquery(col, conds) { const out = []; Object.entries(L.gdb().gen).forEach(([k, v]) => { if (k.indexOf(col + '/') !== 0) return; if ((conds || []).every(([f, val]) => v[f] === val)) out.push(Object.assign({ id: k.slice(col.length + 1) }, v)); }); return out; },
     put(db) { if (!lsSet('pulse.cloud', db)) throw err('This browser is out of storage space.'); },
     async init() { const uid = lsGet('pulse.cloud.session'); const u = uid && L.db().users[uid]; me = u ? L.pub(u) : null; },
     pub(u) { const { hash, ...rest } = u; return rest; },
@@ -373,6 +379,10 @@ const Cloud = (() => {
     async removeFriend(id) { try { await fb.db.doc('friendships/' + id).delete(); } catch (e) { throw fbErr(e); } },
     async publishFeed(doc) { try { await fb.db.doc('friendFeed/' + me.uid).set(doc); } catch (e) { throw fbErr(e); } },
     async getFeed(uid) { try { const s = await fb.db.doc('friendFeed/' + uid).get(); return s.exists ? s.data() : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); } },
+    async gput(col, id, data, merge) { try { await fb.db.doc(col + '/' + id).set(data, merge ? { merge: true } : undefined); } catch (e) { throw fbErr(e); } },
+    async gget(col, id) { try { const s = await fb.db.doc(col + '/' + id).get(); return s.exists ? Object.assign({ id }, s.data()) : null; } catch (e) { if (e.code === 'permission-denied') return null; throw fbErr(e); } },
+    async gdel(col, id) { try { await fb.db.doc(col + '/' + id).delete(); } catch (e) { throw fbErr(e); } },
+    async gquery(col, conds) { try { let q = fb.db.collection(col); (conds || []).forEach(([f, v]) => { q = q.where(f, '==', v); }); const r = await q.get(), out = []; r.forEach(d => out.push(Object.assign({ id: d.id }, d.data()))); return out; } catch (e) { throw fbErr(e); } },
     async myReviews() { const q = await fb.db.collection('reviews').where('uid', '==', me.uid).get(); const out = {}; q.forEach(d => out[d.id] = d.data()); return out; }
   };
 
@@ -385,7 +395,8 @@ const Cloud = (() => {
     async init() { try { await B.init(); } catch (e) { console.warn(e); api.offline = true; me = null; } try { B.schoolList().catch(() => {}); } catch (e) {} },
     signUp: d => B.signUp(d), signIn: (e, p) => B.signIn(e, p), signOut: () => B.signOut(), resetPassword: e => B.resetPassword(e),
     updateProfile: f => B.updateProfile(f), loadState: () => B.loadState(), saveState: s => B.saveState(s),
-    publishProgress: d => B.publishProgress(d), coachRoster: () => B.coachRoster(),
+    gput: (c, i, d, m) => B.gput(c, i, d, m), gget: (c, i) => B.gget(c, i), gdel: (c, i) => B.gdel(c, i), gquery: (c, q) => B.gquery(c, q),
+        publishProgress: d => B.publishProgress(d), coachRoster: () => B.coachRoster(),
     putNote: (i, d) => B.putNote(i, d), getNote: i => B.getNote(i), putReview: (i, d) => B.putReview(i, d), getReview: i => B.getReview(i), myReviews: () => B.myReviews(),
     resSignUp: (sc, i, e, p) => B.resSignUp(sc, i, e, p), resSignIn: (sc, i, p) => B.resSignIn(sc, i, p), resSession: () => B.resSession(), resResend: () => B.resResend(), resCheck: () => B.resCheck(), resSignOut: () => B.resSignOut(), resGet: (e, i) => B.resGet(e, i), resVerifyNow: () => B.resVerifyNow ? B.resVerifyNow() : Promise.resolve(false), normSid,
     friendCode: () => B.friendCode(), findCode: c => B.findCode(cleanCode(c)), requestFriend: o => B.requestFriend(o), myFriendships: () => B.myFriendships(), acceptFriend: i => B.acceptFriend(i), removeFriend: i => B.removeFriend(i), publishFeed: d => B.publishFeed(d), getFeed: u => B.getFeed(u), cleanCode,

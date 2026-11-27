@@ -85,3 +85,15 @@ Honest limits: the name, ID and date of birth lookup can be guessed by someone w
 Coaches see sessions (exercises, weights, per-set times), weigh-in trends, the last 7 days of food with off-plan items and how Pulse rated them, allergies, injuries and diet, water, protein and readiness, flags, and supplement requests with the doctor's note. They do not see glass photos or Ask Pulse chats. Friends only see consistency and progress, never food or body weight. Because students can be under 18, the app tells them exactly what is shared on the Coach tab, and your school should confirm this is acceptable under its own policy.
 
 Pulse gives general guidance, not medical advice.
+
+## Training, safety and the leaderboard (added November 2026)
+
+- **Training:** automatic progression (up when sets finish easy, down after two hard sessions), "Something hurts?" swaps out exercises that load the sore area for 14 days, guided warm-up and cool-down timers, and a Missed day page that moves, lightens or skips a session (rule-based, no AI service).
+- **Habits:** daily streak, more badges, in-app and browser reminders while Pulse is open, a calendar file (.ics) with alarms for training days, CSV export, weekly local backup with restore.
+- **Under 18:** nothing is shared with coaches, a trainer or the leaderboard until a parent or guardian agrees (Profile → Safety and sharing). Firestore rules also refuse progress documents for under-18s without consent.
+- **Reports:** every signed-in user can report a message, person or leaderboard entry. Admins read them.
+- **Messages:** coaches write to students at their own school; students can reply. 
+- **Leaderboard:** a student claims a lift (live or with a private video link), a coach at their school ticks "I saw it" and verifies it, and only then does it reach the board (name, school, grade, kg). The video link is stored in `liftProof`, readable only by the student and their school's coaches. Students can leave the board at any time and their entries are deleted.
+- **Team view** (coach): per-sport table, pain flags, meal-photo counts, CSV.
+- **Meal photos:** optional. A small thumbnail stays on the device; coaches only see how many meals were photo-logged.
+- **Admin:** in Firestore, create `admins/{your uid}` (any field). Open Admin in the coach app to list schools, coaches, students and reports, reset a school's coach code, or suspend new coach sign-ups for a school. Your uid is shown on the Admin page.

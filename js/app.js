@@ -3,10 +3,10 @@
    ========================================================= */
 
 const LS = 'pulse.v3', LS_DRAFT = 'pulse.draft', LS_PREFS = 'pulse.prefs', LS_THEME = 'pulse.theme';
-const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'trainer', 'results', 'profile', 'missed'];
+const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'trainer', 'results', 'board', 'profile', 'missed'];
 /* someone who is not at a school (university, or an adult) never sees the school-only tabs */
 const adultMode = () => !!(S && S.profile && !S.sample && !S.profile.school);
-const SCHOOL_ONLY = ['coach', 'results'];
+const SCHOOL_ONLY = ['coach', 'results', 'board'];
 const HIDDEN_NAV = ['missed'];
 const navViews = () => APP_VIEWS.filter(v => !HIDDEN_NAV.includes(v) && !(adultMode() && SCHOOL_ONLY.includes(v)));
 const LANDING_SECTIONS = ['method', 'product', 'block', 'science', 'faq'];
@@ -22,6 +22,7 @@ const VIEW_META = {
   trainer: { t: 'Trainer', ic: 'shield' },
   missed: { t: 'Missed day', ic: 'today' },
   results: { t: 'Results', ic: 'medal' },
+  board: { t: 'Leaderboard', ic: 'medal' },
   profile: { t: 'Profile', ic: 'profile' }
 };
 

@@ -174,7 +174,7 @@ const Sync = {
       }
       if (!TR.loaded && !TR.loading) await trLoad(true);
       const trainerOn = TR.links.some(l => l.status === 'accepted');
-      if (trainerOn) { const td = traineeDoc(REAL), tk = JSON.stringify(Object.assign({}, td, { updatedAt: 0 })); if (tk !== this.lastTr) { await Cloud.publishTrainee(td); this.lastTr = tk; } }
+      if (trainerOn && consentOK(REAL)) { const td = traineeDoc(REAL), tk = JSON.stringify(Object.assign({}, td, { updatedAt: 0 })); if (tk !== this.lastTr) { await Cloud.publishTrainee(td); this.lastTr = tk; } }
       else if (this.lastTr) { await Cloud.deleteTrainee(); this.lastTr = ''; }
       if (this.failed) toast('Back online. Everything is synced.');
       this.failed = false;
