@@ -7,7 +7,7 @@
      only be opened by someone who knows all of those. Firestore rules also block listing the results.
    ========================================================= */
 const TIERS = ['none', 'bronze', 'silver', 'gold'], TIER_L = { none: 'No pin yet', bronze: 'Bronze pin', silver: 'Silver pin', gold: 'Gold pin' };
-const RES = { events: [], loaded: false, loading: false, err: '', sel: null, q: '', out: null, busy: false, kind: 'private', build: null, busyBuild: false, codes: null };
+const RES = { rs: null, rsLoaded: false, lg: { mode: 'login', busy: false, msg: '', email: '', demo: false }, events: [], loaded: false, loading: false, err: '', sel: null, q: '', out: null, busy: false, kind: 'private', build: null, busyBuild: false, codes: null };
 const b64 = u8 => btoa(String.fromCharCode(...u8)), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0)), hex = u8 => [...u8].map(x => x.toString(16).padStart(2, '0')).join('');
 const normName = s => String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const normId = s => String(s || '').toUpperCase().replace(/[\s-]/g, '');
@@ -68,29 +68,28 @@ async function buildPrivate(o, onProg) {
   if (errs.length) return { errs };
   const head = rows[0].map(h => h.trim().toLowerCase()), col = k => head.indexOf(k);
   ['name', 'id', 'dob'].forEach(k => { if (col(k) < 0) errs.push(`The header row needs a "${k}" column.`); });
-  if (o.codes === 'file' && col('code') < 0) errs.push('The header row needs a "code" column, or choose "Generate a code per student".');
   const ci = crit.map(c => head.indexOf(c.n.toLowerCase())); crit.forEach((c, i) => { if (ci[i] < 0) errs.push(`No column named "${c.n}" in the header row.`); });
   if (errs.length) return { errs };
-  const ev = { id: o.id || rid(), title: o.title, date: o.date, kind: 'private', desc: o.desc || '', salt: b64(crypto.getRandomValues(new Uint8Array(12))), rule: o.rule === 'avg' ? 'avg' : 'min', needCode: o.codes !== 'none', crit, n: 0 };
-  const seen = new Set(), sealed = [], codes = [], tally = { gold: 0, silver: 0, bronze: 0, none: 0 };
+  const ev = { id: o.id || rid(), title: o.title, date: o.date, kind: 'private', desc: o.desc || '', salt: b64(crypto.getRandomValues(new Uint8Array(12))), rule: o.rule === 'avg' ? 'avg' : 'min', needCode: false, crit, n: 0 };
+  const seen = new Set(), sealed = [], logins = [], tally = { gold: 0, silver: 0, bronze: 0, none: 0 };
   for (let r = 1; r < rows.length; r++) {
     const R = rows[r], name = (R[col('name')] || '').trim(), id = (R[col('id')] || '').trim(), dob = (R[col('dob')] || '').trim();
     if (!name || !id) { errs.push(`Row ${r + 1}: name and id are required.`); continue; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || isNaN(new Date(dob))) { errs.push(`Row ${r + 1} (${name}): date of birth must look like 2009-05-14.`); continue; }
-    const code = o.codes === 'gen' ? genCode() : o.codes === 'file' ? (R[col('code')] || '').trim() : '';
-    if (o.codes === 'file' && !code) { errs.push(`Row ${r + 1} (${name}): code is empty.`); continue; }
+    const code = '', email = col('email') >= 0 ? (R[col('email')] || '').trim().toLowerCase() : '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { errs.push(`Row ${r + 1} (${name}): the email does not look right.`); continue; }
     const key = [normName(name), normId(id), dob].join('|');
     if (seen.has(key)) { errs.push(`Row ${r + 1} (${name}): duplicate of an earlier row.`); continue; } seen.add(key);
     const scores = ci.map(i => { const v = (R[i] || '').trim(); return v === '' ? '' : +v; });
     if (scores.some(v => v !== '' && !isFinite(v))) { errs.push(`Row ${r + 1} (${name}): scores must be numbers (leave blank if not attempted).`); continue; }
     tally[TIERS[pinOf(ev, scores).pin]]++;
     sealed.push({ name, id, dob, code, rec: { name, scores, note: col('note') >= 0 ? (R[col('note')] || '').trim() : '' } });
-    if (o.codes === 'gen') codes.push([name, id, code]);
+    if (email) logins.push({ sid: normId(id), email, rec: sealed[sealed.length - 1].rec });
   }
   if (errs.length) return { errs };
   const out = [];
   for (let i = 0; i < sealed.length; i++) { const s = sealed[i]; out.push(await sealRow(ev, s.name, s.id, s.dob, s.code, s.rec)); if (onProg) onProg(i + 1, sealed.length); }
-  ev.n = out.length; return { ev, rows: out, tally, codes };
+  ev.n = out.length; ev.logins = logins.length; return { ev, rows: out, tally, logins };
 }
 function buildPublic(o) {
   const errs = [], rows = parseCSV(o.csv); if (rows.length < 2) return { errs: ['Paste the results table with a header row and at least one result.'] };
@@ -143,18 +142,54 @@ function evDetail(ev) {
       <div class="card" style="margin-bottom:16px"><div class="card-b"><div class="field"><label for="res-q">Find a winner or an event</label><input class="input" id="res-q" type="search" value="${esc(RES.q)}" placeholder="Name or event, e.g. 100m" autocomplete="off"></div></div></div>
       <div class="stack">${ev.cats.map(c => ({ c, pl: c.places.filter(p => !q || normName(c.name + ' ' + p.name + ' ' + p.house).includes(q)) })).filter(x => x.pl.length).map(({ c, pl }) => `<section class="card"><div class="card-h"><h3>${esc(c.name)}</h3></div><div class="card-b"><table class="res-t">${pl.map(p => `<tr><td style="width:3em"><b>${p.p === 1 ? '1st' : p.p === 2 ? '2nd' : p.p === 3 ? '3rd' : p.p + 'th'}</b></td><td>${esc(p.name)}</td><td class="muted">${esc(p.house)}</td><td class="muted">${esc(p.res)}</td></tr>`).join('')}</table></div></section>`).join('') || `<div class="card"><div class="empty"><h4>Nothing matches</h4><p>Try a different search.</p></div></div>`}</div>`;
   }
+  if (RES.out && RES.out.ok) return `${evHead(ev)}${resCard(ev, RES.out.rec)}${RES.rs ? `<p class="muted" style="font-size:13px;margin-top:12px">Logged in with student ID ${esc(RES.rs.sid)}. <button class="btn btn-quiet btn-sm" data-act="rl-out">Log out</button></p>` : ''}`;
+  if (!RES.rsLoaded) { RES.rsLoaded = true; Cloud.resSession().then(x => { RES.rs = x; if (x && x.verified) resFetchLogin(ev); else resRedraw(); }).catch(() => resRedraw()); }
+  return `${evHead(ev)}${loginCard(ev)}${oldLookupCard(ev)}`;
+}
+function resFetchLogin(ev) {
+  if (!RES.rs || !RES.rs.verified) return;
+  RES.lg.busy = true; resRedraw();
+  Cloud.resGet(ev.id, RES.rs.sid).then(rec => {
+    RES.lg.busy = false;
+    RES.out = rec ? { ok: 1, rec } : { ok: 0, msg: 'No result is published for this student ID yet. Your school list may not have your email, or it may have a different one. Ask your PE teacher.' };
+    resRedraw();
+  }).catch(x => { RES.lg.busy = false; RES.out = { ok: 0, msg: x.message || 'Could not load your result. Try again.' }; resRedraw(); });
+}
+/* student ID + password, with a verification email for anyone who has not created a login yet */
+function loginCard(ev) {
+  const g = RES.lg, bad = RES.out && !RES.out.ok && !RES.out.old ? `<p role="alert" style="color:var(--bad);margin-top:10px">${esc(RES.out.msg)}</p>` : '';
+  const err = g.msg ? `<p role="alert" id="rl-err" style="color:var(--bad);margin-top:10px">${esc(g.msg)}</p>` : '';
+  const sidField = (id) => `<div class="field"><label for="${id}">Student ID</label><input class="input" id="${id}" name="sid" required maxlength="30" autocomplete="username" autocapitalize="characters" spellcheck="false" placeholder="Your school ID number" value="${esc(g.sidIn || '')}"></div>`;
+  if (RES.rs && RES.rs.verified) return `<div class="card"><div class="card-h"><h3>Your result</h3></div><div class="card-b">${g.busy ? '<div class="empty" style="padding:30px 8px"><span class="spin lg"></span><h4>Finding your result…</h4></div>' : `<p class="muted">Logged in with student ID ${esc(RES.rs.sid)}.</p>${bad}<div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-act="rl-out">Log out</button></div>`}</div></div>`;
+  if (g.mode === 'verify') return `<div class="card"><div class="card-h"><h3>Check your email</h3></div><div class="card-b">
+    <p>We sent a verification link to <b>${esc(g.email)}</b>. Open it, then come back here and tap the button below.</p>
+    ${g.demo ? `<p class="muted" style="font-size:13px;margin-top:8px">Demo mode cannot send real email. Tap "Simulate the email link" to carry on.</p>` : `<p class="muted" style="font-size:13px;margin-top:8px">It can take a minute. Check spam if you cannot see it.</p>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">${g.demo ? '<button class="btn btn-ghost" data-act="rl-demo">Simulate the email link</button>' : ''}<button class="btn btn-primary" data-act="rl-check" ${g.busy ? 'disabled' : ''}>${g.busy ? 'Checking…' : 'I have verified my email'}</button>${g.demo ? '' : '<button class="btn btn-quiet" data-act="rl-resend">Send it again</button>'}<button class="btn btn-quiet" data-act="rl-mode" data-m="login">Back</button></div>${err}</div></div>`;
+  if (g.mode === 'create') return `<div class="card"><div class="card-h"><h3>Create your student ID login</h3></div><div class="card-b">
+    <p class="muted" style="font-size:14px;margin-bottom:14px">Use the email your school has for you. We send a verification link to it. You only see a result if your verified email matches the one on your school's list.</p>
+    <form id="res-create" novalidate>${sidField('rc-i')}
+      <div class="field" style="margin-top:12px"><label for="rc-e">School email</label><input class="input" id="rc-e" name="email" type="email" required maxlength="80" autocomplete="email" placeholder="you@school.org" value="${esc(g.emailIn || '')}"></div>
+      <div class="field" style="margin-top:12px"><label for="rc-p">Choose a password<span class="hint">At least 8 characters</span></label><input class="input" id="rc-p" name="pw" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></div>
+      <div class="field" style="margin-top:12px"><label for="rc-p2">Repeat the password</label><input class="input" id="rc-p2" name="pw2" type="password" required maxlength="72" autocomplete="new-password"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn btn-primary" ${g.busy ? 'disabled' : ''}>${g.busy ? 'Sending…' : 'Send verification email'}</button><button class="btn btn-quiet" type="button" data-act="rl-mode" data-m="login">I already have one</button></div>${err}</form></div></div>`;
+  return `<div class="card"><div class="card-h"><h3>See your own result</h3></div><div class="card-b">
+    <p class="muted" style="font-size:14px;margin-bottom:14px">Log in with your student ID and password.</p>
+    <form id="res-login" novalidate>${sidField('rg-i')}
+      <div class="field" style="margin-top:12px"><label for="rg-p">Password</label><input class="input" id="rg-p" name="pw" type="password" required maxlength="72" autocomplete="current-password"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn btn-primary" ${g.busy || lockLeft() ? 'disabled' : ''}>${g.busy ? 'Logging in…' : 'Log in'}</button></div>${lockLeft() ? `<p class="muted" role="alert" style="margin-top:8px">Too many tries. Wait ${lockLeft()} seconds.</p>` : ''}${err}${bad}</form>
+    <p style="margin-top:16px;font-size:14px">No student ID login yet? <button class="btn btn-quiet btn-sm" data-act="rl-mode" data-m="create">Create one with your email</button></p></div></div>`;
+}
+function oldLookupCard(ev) {
   const lk = lockLeft(), needLogin = Cloud.mode === 'firebase' && !Cloud.user;
-  if (RES.out && RES.out.ok) return `${evHead(ev)}${resCard(ev, RES.out.rec)}`;
-  return `${evHead(ev)}<div class="card"><div class="card-h"><h3>See your own result</h3></div><div class="card-b">
-    <p class="muted" style="font-size:14px;margin-bottom:14px">This result is private. Enter the same details your school has on file. Pulse never shows anyone else's result, and results are stored encrypted, so they cannot be opened without these details.</p>
-    ${needLogin ? `<p><b>Log in with your Pulse account to look up a personal result.</b></p><a class="btn btn-primary" href="#/login">Log in</a>` : `<form id="res-look" autocomplete="off" novalidate>
+  return `<details class="card" style="margin-top:16px"><summary class="card-h" style="cursor:pointer"><h3>Or use your name and date of birth</h3></summary><div class="card-b">
+    <p class="muted" style="font-size:14px;margin-bottom:14px">Enter the same details your school has on file. Results are stored encrypted, so they cannot be opened without these details.</p>
+    ${ev.needCode ? `<p role="alert" style="color:var(--bad)">This result was published with an access code, which is no longer used. Ask your PE teacher to publish it again.</p>` : needLogin ? `<p><b>Log in with your Pulse account to use this option.</b></p><a class="btn btn-primary" href="#/login">Log in</a>` : `<form id="res-look" autocomplete="off" novalidate>
       <div class="field"><label for="rl-n">Full name</label><input class="input" id="rl-n" name="name" required maxlength="60" placeholder="As on your school record"></div>
       <div class="field" style="margin-top:12px"><label for="rl-i">School ID</label><input class="input" id="rl-i" name="sid" required maxlength="30" autocomplete="off" placeholder="Your school ID number"></div>
       <div class="field" style="margin-top:12px"><label for="rl-d">Date of birth</label><input class="input" id="rl-d" name="dob" type="date" required></div>
-      ${ev.needCode ? `<div class="field" style="margin-top:12px"><label for="rl-c">Access code</label><input class="input" id="rl-c" name="code" required maxlength="20" autocomplete="off" placeholder="The code your PE teacher gave you"></div>` : ''}
       <div style="margin-top:16px"><button class="btn btn-primary" ${RES.busy || lk ? 'disabled' : ''}>${RES.busy ? 'Checking…' : 'Show my result'}</button></div>
       ${lk ? `<p class="muted" role="alert" style="margin-top:8px">Too many tries. Wait ${lk} seconds.</p>` : ''}
-      ${RES.out && !RES.out.ok ? `<p role="alert" style="color:var(--bad);margin-top:10px">${esc(RES.out.msg)}</p>` : ''}</form>`}</div></div>`;
+      ${RES.out && !RES.out.ok && RES.out.old ? `<p role="alert" style="color:var(--bad);margin-top:10px">${esc(RES.out.msg)}</p>` : ''}</form>`}</div></details>`;
 }
 function resCard(ev, r) {
   const { pin, ts } = pinOf(ev, r.scores), saved = (S.pins || []).some(p => p.ev === ev.id);
@@ -178,8 +213,7 @@ function resCoachView() {
       <div class="field" style="margin-top:12px"><label for="rb-s">Short description (optional)</label><input class="input" id="rb-s" name="desc" maxlength="100"></div>
       ${k === 'private' ? `<div class="field" style="margin-top:12px"><label for="rb-c">Pin criteria, one test per line<span class="hint">Test | unit | higher or lower | bronze | silver | gold. Each number is the minimum needed for that pin.</span></label><textarea class="input" id="rb-c" name="crit" rows="4" placeholder="Push-ups | reps | higher | 15 | 25 | 35&#10;1 km run | min | lower | 6 | 5 | 4"></textarea></div>
       <div class="field" style="margin-top:12px"><label for="rb-r">How the overall pin is decided</label><select class="input" id="rb-r" name="rule"><option value="min">Lowest level across all tests</option><option value="avg">Average level across all tests</option></select></div>
-      <div class="field" style="margin-top:12px"><label for="rb-o">Access codes<span class="hint">Codes make guessing much harder. Hand each student theirs in person. Without codes, anyone who knows a classmate's name, ID and birthday could see their result.</span></label><select class="input" id="rb-o" name="codes"><option value="gen">Generate a code per student (recommended)</option><option value="file">Use the "code" column in my table</option><option value="none">No codes. Name, ID and date of birth only</option></select></div>
-      <div class="field" style="margin-top:12px"><label for="rb-v">Results table (CSV)<span class="hint">Columns: name, id, dob (YYYY-MM-DD), one column per test named exactly as above, optional note. Leave a score blank if not attempted.</span></label><textarea class="input" id="rb-v" name="csv" rows="7" placeholder="name,id,dob,Push-ups,1 km run,note&#10;Asha Rao,VV1042,2009-05-14,28,5.4,Great effort"></textarea></div>`
+      <div class="field" style="margin-top:12px"><label for="rb-v">Results table (CSV)<span class="hint">Columns: name, id, dob (YYYY-MM-DD), email, one column per test named exactly as above, optional note. The email is the student's school email: students who verify that email can log in with their student ID and password to see their result. Leave a score blank if not attempted.</span></label><textarea class="input" id="rb-v" name="csv" rows="7" placeholder="name,id,dob,Push-ups,1 km run,note&#10;Asha Rao,VV1042,2009-05-14,28,5.4,Great effort"></textarea></div>`
       : `<div class="field" style="margin-top:12px"><label for="rb-v">Results table (CSV)<span class="hint">Columns: category, place (1 to 8), name; optional house and result. House points are added up for you.</span></label><textarea class="input" id="rb-v" name="csv" rows="7" placeholder="category,place,name,house,result&#10;100m Under 16 Boys,1,Arjun Mehta,Red,12.4s"></textarea></div>`}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center"><label class="btn btn-ghost btn-sm" style="cursor:pointer">${IC.upload}Load CSV from file<input type="file" accept=".csv,text/csv,text/plain" data-rcsv hidden></label><button class="btn btn-primary" ${RES.busyBuild ? 'disabled' : ''}>${RES.busyBuild ? 'Encrypting…' : 'Build and publish'}</button></div>
       <div id="res-stat" aria-live="polite">${resStat()}</div></form></div></div>`;
@@ -187,7 +221,7 @@ function resCoachView() {
 function resStat() {
   const b = RES.build; if (!b) return '';
   if (b.errs) return `<div role="alert" style="color:var(--bad);margin-top:10px">${b.errs.slice(0, 8).map(x => `<div>${esc(x)}</div>`).join('')}${b.errs.length > 8 ? `<div>and ${b.errs.length - 8} more</div>` : ''}</div>`;
-  return `<div style="margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px"><b>Published: ${esc(b.done)}</b><p class="muted" style="margin:.3em 0;font-size:13.5px">${esc(b.sum)}</p>${RES.codes && RES.codes.length ? `<p class="muted" style="font-size:13.5px">Download the access codes now. They are not stored anywhere and cannot be recovered.</p><button type="button" class="btn btn-accent btn-sm" data-act="res-codes">${IC.download}Download access codes</button>` : ''}</div>`;
+  return `<div style="margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px"><b>Published: ${esc(b.done)}</b><p class="muted" style="margin:.3em 0;font-size:13.5px">${esc(b.sum)}</p>${false ? `<p class="muted" style="font-size:13.5px">Download the access codes now. They are not stored anywhere and cannot be recovered.</p><button type="button" class="btn btn-accent btn-sm" data-act="res-codes">${IC.download}Download access codes</button>` : ''}</div>`;
 }
 const dlFile = (name, txt, type) => { const b = new Blob([txt], { type: type || 'text/plain' }), l = document.createElement('a'); l.href = URL.createObjectURL(b); l.download = name; document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(l.href), 2000); };
 
@@ -205,8 +239,22 @@ Object.assign(ACT, {
   'res-del': el => confirmModal({ title: 'Delete this event?', sub: 'Students will no longer see these results. This cannot be undone.', confirm: 'Delete', danger: true, onConfirm: async () => {
     try { await Cloud.deleteEvent(el.dataset.id); RES.events = RES.events.filter(e => e.id !== el.dataset.id); toast('Event deleted.'); resRedraw(); } catch (e) { toast(e.message, { type: 'err' }); }
   } }),
+  'rl-mode': el => { RES.lg.mode = el.dataset.m; RES.lg.msg = ''; drawView(); },
+  'rl-out': async () => { try { await Cloud.resSignOut(); } catch (e) {} RES.rs = null; RES.out = null; RES.lg = { mode: 'login', busy: false, msg: '', email: '', demo: false }; drawView(); },
+  'rl-demo': async () => { try { await Cloud.resVerifyNow(); } catch (e) { RES.lg.msg = e.message; drawView(); return; } await rlCheck(); },
+  'rl-check': () => rlCheck(),
+  'rl-resend': async () => { try { await Cloud.resResend(); toast('Verification email sent again.'); } catch (e) { RES.lg.msg = e.message || 'Could not send it.'; drawView(); } },
   'res-codes': () => { if (RES.codes) dlFile('access-codes.csv', 'name,id,access code\n' + RES.codes.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv'); }
 });
+async function rlCheck() {
+  const ev = RES.events.find(e => e.id === RES.sel); RES.lg.busy = true; RES.lg.msg = ''; drawView();
+  try {
+    const ok = await Cloud.resCheck(); RES.lg.busy = false;
+    if (!ok) { RES.lg.msg = 'Your email is not verified yet. Open the link in the email we sent, then try again.'; drawView(); return; }
+    RES.rs = await Cloud.resSession(); RES.lg.mode = 'login'; toast('Email verified. Your student ID login is ready.');
+    if (ev) resFetchLogin(ev); else drawView();
+  } catch (e) { RES.lg.busy = false; RES.lg.msg = e.message || 'Could not check. Try again.'; drawView(); }
+}
 document.addEventListener('input', e => {
   if (e.target.id !== 'res-q') return; RES.q = e.target.value; const p = e.target.selectionStart; drawView(); const i = $('#res-q'); if (i) { i.focus(); try { i.setSelectionRange(p, p); } catch (x) {} }
 });
@@ -216,25 +264,47 @@ document.addEventListener('change', e => {
   if (t.matches && t.matches('[data-rcsv]') && t.files[0]) { const f = t.files[0]; if (f.size > 4e6) { toast('That file is too large.', { type: 'err' }); return; } f.text().then(x => { const ta = $('#rb-v'); if (ta) ta.value = x; }); }
 });
 document.addEventListener('submit', async e => {
-  const f = e.target, fid = f.getAttribute('id'); if (fid !== 'res-look' && fid !== 'res-build') return;
+  const f = e.target, fid = f.getAttribute('id'); if (fid !== 'res-look' && fid !== 'res-build' && fid !== 'res-login' && fid !== 'res-create') return;
   e.preventDefault(); const D = Object.fromEntries(new FormData(f));
+  if (fid === 'res-login' || fid === 'res-create') {
+    const ev = RES.events.find(x => x.id === RES.sel), g = RES.lg; if (!ev || g.busy) return;
+    g.sidIn = String(D.sid || '').slice(0, 30); if (fid === 'res-create') g.emailIn = String(D.email || '').slice(0, 80);
+    const sid = Cloud.normSid(D.sid), fail = m => { g.msg = m; drawView(); const el = $('#rl-err'); if (el) el.focus && el.setAttribute('tabindex', '-1'); };
+    if (!sid) return fail('Enter your student ID.');
+    if (fid === 'res-login') {
+      if (lockLeft()) return; if (!D.pw) return fail('Enter your password.');
+      g.busy = true; g.msg = ''; drawView();
+      try { RES.rs = await Cloud.resSignIn(ev.school, D.sid, D.pw); g.busy = false; noteAttempt(true);
+        if (!RES.rs.verified) { g.mode = 'verify'; g.email = RES.rs.email; g.demo = Cloud.mode !== 'firebase'; drawView(); return; }
+        resFetchLogin(ev); } catch (x) { g.busy = false; noteAttempt(false); fail(x.message || 'Could not log in.'); }
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(D.email).trim())) return fail('Enter your school email address.');
+    if (!D.pw || D.pw.length < 8) return fail('Use at least 8 characters for your password.');
+    if (D.pw !== D.pw2) return fail('The two passwords are not the same.');
+    g.busy = true; g.msg = ''; drawView();
+    try { const r = await Cloud.resSignUp(ev.school, D.sid, D.email, D.pw); g.busy = false; g.email = r.email; g.demo = Cloud.mode !== 'firebase';
+      if (r.verified) { RES.rs = await Cloud.resSession(); g.mode = 'login'; resFetchLogin(ev); } else { g.mode = 'verify'; drawView(); } }
+    catch (x) { g.busy = false; fail(x.message || 'Could not create your login.'); }
+    return;
+  }
   if (fid === 'res-look') {
     const ev = RES.events.find(x => x.id === RES.sel); if (!ev || RES.busy || lockLeft()) return;
     RES.busy = true; RES.out = null; drawView(); let rec = null, fail = '';
-    try { rec = await lookupResult(ev, D.name, D.sid, D.dob, D.code || ''); } catch (x) { fail = x.message || ''; }
+    try { rec = await lookupResult(ev, D.name, D.sid, D.dob, ''); } catch (x) { fail = x.message || ''; }
     RES.busy = false; if (!fail) noteAttempt(!!rec);
-    RES.out = rec ? { ok: 1, rec } : { ok: 0, msg: fail || ('No result found for those details. Check the spelling of your name, your ID and your date of birth' + (ev.needCode ? ' and your access code' : '') + '. If it still does not work, your result may not be published yet. Ask your PE teacher.') };
+    RES.out = rec ? { ok: 1, rec } : { ok: 0, old: 1, msg: fail || ('No result found for those details. Check the spelling of your name, your ID and your date of birth' + '' + '. If it still does not work, your result may not be published yet. Ask your PE teacher.') };
     drawView(); return;
   }
-  if (RES.busyBuild) return; RES.busyBuild = true; RES.build = null; RES.codes = null;
+  if (RES.busyBuild) return; RES.busyBuild = true; RES.build = null;
   const btn = f.querySelector('.btn-primary'), st = $('#res-stat'); if (btn) { btn.disabled = true; btn.textContent = 'Encrypting…'; } if (st) st.innerHTML = '';
   let res;
   try { res = D.kind === 'public' ? buildPublic(D) : await buildPrivate(D, (i, n) => { if (btn) btn.textContent = 'Encrypting ' + Math.round(i / n * 100) + '%'; }); } catch (x) { res = { errs: ['Something went wrong building the event.'] }; }
   if (res.errs) { RES.busyBuild = false; RES.build = { errs: res.errs }; if (btn) { btn.disabled = false; btn.textContent = 'Build and publish'; } if (st) st.innerHTML = resStat(); return; }
   try {
-    res.ev.school = Cloud.user.school; await Cloud.putEvent(res.ev, res.rows || []);
-    RES.events = RES.events.filter(x => x.id !== res.ev.id).concat(res.ev); RES.codes = res.codes || null;
-    RES.build = { done: res.ev.title, sum: res.ev.kind === 'private' ? `${res.ev.n} students. Gold ${res.tally.gold}, silver ${res.tally.silver}, bronze ${res.tally.bronze}, no pin ${res.tally.none}.` : `${res.ev.cats.length} events.` };
+    res.ev.school = Cloud.user.school; await Cloud.putEvent(res.ev, res.rows || [], res.logins || []);
+    RES.events = RES.events.filter(x => x.id !== res.ev.id).concat(res.ev); RES.codes = null;
+    RES.build = { done: res.ev.title, sum: res.ev.kind === 'private' ? `${res.ev.n} students (${res.ev.logins} with an email, who can log in). Gold ${res.tally.gold}, silver ${res.tally.silver}, bronze ${res.tally.bronze}, no pin ${res.tally.none}.${res.ev.logins < res.ev.n ? ' Students without an email can only use the name, ID and date of birth lookup.' : ''}` : `${res.ev.cats.length} events.` };
     RES.busyBuild = false; coachDraw(); const s2 = $('#res-stat'); if (s2) s2.innerHTML = resStat(); toast('Event published.');
   } catch (x) { RES.busyBuild = false; RES.build = { errs: [x.message || 'Could not publish. Try again.'] }; coachDraw(); const s2 = $('#res-stat'); if (s2) s2.innerHTML = resStat(); }
 }, true);
