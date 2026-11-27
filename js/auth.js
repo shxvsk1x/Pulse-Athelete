@@ -9,7 +9,7 @@ function authShell(inner, aside = '') {
       <div class="auth-lanes" aria-hidden="true">${typeof LANES_SVG === 'function' ? LANES_SVG('draw') : ''}</div>
       <div class="auth-copy">${aside || `<h2 class="h-display" style="font-size:clamp(34px,4vw,52px)">Train for the gym <em>you actually</em> have.</h2>
         <p>Plans built from your equipment, meals sized to your goal, and water that finally gets the attention it deserves.</p>`}</div>
-      <div class="auth-meta"><span>${IC.check}Built for student athletes</span><span>${IC.check}Coaches see progress, not your food log</span></div>
+      <div class="auth-meta"><span>${IC.check}For school athletes and adults alike</span><span>${IC.check}You choose who follows your progress</span></div>
     </aside>
     <main class="auth-main" id="main">${inner}</main></div>`;
 }
@@ -38,22 +38,26 @@ function showAuth(kind) {
   const schools = PULSE_CONFIG.schools || [];
   const sel = (id, label, opts, val, hint = '') => `<div class="field" data-field="${id}"><label for="a-${id}">${label}${hint ? ` <span class="hint">${hint}</span>` : ''}</label><select class="input" id="a-${id}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
   const fld = (id, label, type, ph, ac, extra = '') => `<div class="field" data-field="${id}"><label for="a-${id}">${label}</label><div class="input-wrap">${`<input class="input" id="a-${id}" type="${type}" placeholder="${ph}" autocomplete="${ac}" ${extra}>`}${type === 'password' ? `<button type="button" class="pw-eye" data-act="pw-eye" aria-label="Show password">${IC.eye.replace('<svg', '<svg width="16" height="16"')}</button>` : ''}</div></div>`;
-  const coach = AUTHF.role === 'coach';
+  const coach = AUTHF.role === 'coach', trainer = AUTHF.role === 'trainer';
   const form = kind === 'signup' ? `
-      <div class="seg full" role="radiogroup" aria-label="Account type">${[['student', 'I’m a student'], ['coach', 'I’m a coach']].map(([v, l]) => `<button type="button" role="radio" data-act="auth-role" data-v="${v}" aria-checked="${AUTHF.role === v}">${l}</button>`).join('')}</div>
+      <div class="seg full" role="radiogroup" aria-label="Account type">${[['student', 'I’m an athlete'], ['coach', 'I’m a coach'], ['trainer', 'I’m a trainer']].map(([v, l]) => `<button type="button" role="radio" data-act="auth-role" data-v="${v}" aria-checked="${AUTHF.role === v}">${l}</button>`).join('')}</div>
       ${fld('name', 'Full name', 'text', coach ? 'e.g. Ms Rhea Kapoor' : 'e.g. Maya Sharma', 'name', 'maxlength="40"')}
-      ${fld('email', 'Email', 'email', 'you@school.edu', 'email')}
+      ${fld('email', 'Email', 'email', trainer ? 'you@example.com' : 'you@school.edu', 'email')}
       ${fld('pw', 'Password', 'password', 'At least 6 characters', 'new-password')}
-      <div class="grid-2">${sel('school', 'School', [['', 'Choose your school'], ...schools.map(sc => [sc.id, sc.name])], schools.length === 1 ? schools[0].id : '')}
-      ${coach ? fld('code', 'Coach access code', 'text', 'From your school’s Pulse admin', 'off', 'autocapitalize="characters"') : sel('grade', 'Grade', [['', 'Choose'], ...(PULSE_CONFIG.grades || []).map(g => [g, 'Grade ' + g])], '')}</div>
+      ${trainer ? `<p class="muted" style="font-size:13.5px">Pulse sends a link to your email to verify it. Your clients see that verified email when you ask to follow them, and they must accept before you see anything.</p>` : `
+      <div class="field" data-field="school" id="a-schoolbox" ${AUTHF.noSchool && !coach ? 'hidden' : ''}><label for="a-school">School <span class="hint">${coach ? 'Type your school’s name' : 'Type your school’s name, any school is fine'}</span></label>
+        <input class="input" id="a-school" list="a-school-list" type="text" placeholder="e.g. Vasant Valley School" autocomplete="organization" maxlength="80" value="${esc(AUTHF.schoolIn || '')}"><datalist id="a-school-list">${schools.map(sc => `<option value="${esc(sc.name)}"></option>`).join('')}</datalist></div>
+      ${coach ? fld('code', 'Coach access code', 'text', 'New school? Choose one. Joining? Ask your head coach.', 'off', 'autocapitalize="characters"')
+        : `<label class="chk"><input type="checkbox" id="a-noschool" ${AUTHF.noSchool ? 'checked' : ''}><span>I’m not at a school (university, or an adult)</span></label>
+           <div id="a-gradebox" ${AUTHF.noSchool ? 'hidden' : ''}>${sel('grade', 'Grade', [['', 'Choose'], ...(PULSE_CONFIG.grades || []).map(g => [g, 'Grade ' + g])], '')}</div>`}`}
       ${coach ? `<div class="field" data-field="sports"><span class="flabel">Sports you coach <span class="hint">You will see students who play these</span></span><div class="chips">${[['general', 'PE / general fitness'], ...Object.entries(SPORTS)].map(([v, l]) => `<button type="button" class="chip" data-act="auth-sport" data-v="${v}" aria-pressed="${AUTHF.sports.includes(v)}"><span class="ck">${IC.check}</span>${esc(l.split(' (')[0])}</button>`).join('')}</div></div>` : ''}
       ${!coach && REAL && REAL.profile && !Cloud.user ? `<p class="muted" style="font-size:13px">${IC.check.replace('<svg', '<svg width="14" height="14" style="vertical-align:-2px"')} Your guest plan for <b>${esc(REAL.profile.name)}</b> will move into this account.</p>` : ''}`
     : `${fld('email', 'Email', 'email', 'you@school.edu', 'email')}${fld('pw', 'Password', 'password', 'Your password', 'current-password')}
       <button type="button" class="link-tip" data-act="auth-forgot" style="justify-self:start">Forgot your password?</button>`;
   setScreen('auth', authShell(`<div class="auth-box">
       <a class="btn btn-quiet btn-sm auth-back" href="#/welcome">${IC.back}<span>Back</span></a>
-      <div class="label">${kind === 'signup' ? (coach ? 'Coach account' : 'Student account') : 'Welcome back'}</div>
-      <h1>${kind === 'signup' ? (coach ? 'Follow your <em>athletes.</em>' : 'Create your <em>account.</em>') : 'Log in to <em>Pulse.</em>'}</h1>
+      <div class="label">${kind === 'signup' ? (coach ? 'Coach account' : trainer ? 'Trainer account' : 'Athlete account') : 'Welcome back'}</div>
+      <h1>${kind === 'signup' ? (coach ? 'Follow your <em>athletes.</em>' : trainer ? 'Follow your <em>clients.</em>' : 'Create your <em>account.</em>') : 'Log in to <em>Pulse.</em>'}</h1>
       <form class="auth-form" id="auth-form" data-kind="${kind}" novalidate>${form}
         <div class="form-err" id="auth-err" role="alert" hidden></div>
         <button class="btn btn-primary btn-lg" type="submit" id="auth-go">${kind === 'signup' ? 'Create account' : 'Log in'} ${IC.arrow}</button>
@@ -62,6 +66,7 @@ function showAuth(kind) {
       ${demoNote()}
     </div>`, kind === 'signup' && coach ? `<h2 class="h-display" style="font-size:clamp(32px,3.6vw,48px)">See how your athletes <em>are really doing.</em></h2><p>Weekly sessions, weigh-in trends, hydration and readiness for every student who plays your sport. Plus one place to verify doctors’ notes for supplements.</p>` : ''));
   const f = $('#a-name') || $('#a-email'); if (f && matchMedia('(hover: hover)').matches) f.focus();
+  if (kind === 'signup' && !trainer) Cloud.schoolList().then(m => { const dl = $('#a-school-list'); if (dl) dl.innerHTML = Object.values(m).map(n => `<option value="${esc(n)}"></option>`).join(''); }).catch(() => {});
 }
 function authErr(msg, field) {
   const e = $('#auth-err'); e.hidden = false; e.innerHTML = IC.alert + '<span>' + esc(msg) + '</span>';
@@ -76,8 +81,11 @@ async function submitAuth(form) {
     if (!v('name')) return authErr('Add your name.', 'name');
     if (!Cloud.validEmail(email)) return authErr('Enter a valid email address.', 'email');
     if (pw.length < 6) return authErr('Use at least 6 characters for your password.', 'pw');
-    if (!v('school')) return authErr('Choose your school.', 'school');
-    if (AUTHF.role === 'student' && !v('grade')) return authErr('Choose your grade.', 'grade');
+    const noSchool = AUTHF.role === 'student' && !!($('#a-noschool') || {}).checked;
+    if (AUTHF.role !== 'trainer' && !noSchool) {
+      if (!v('school') || !Cloud.schoolId(v('school'))) return authErr(AUTHF.role === 'coach' ? 'Type the name of your school.' : 'Type your school’s name, or tick “I’m not at a school”.', 'school');
+      if (AUTHF.role === 'student' && !v('grade')) return authErr('Choose your grade.', 'grade');
+    }
     if (AUTHF.role === 'coach' && !v('code')) return authErr('Enter the coach access code from your school.', 'code');
     if (AUTHF.role === 'coach' && !AUTHF.sports.length) return authErr('Pick at least one sport you coach.', 'sports');
   } else {
@@ -87,7 +95,8 @@ async function submitAuth(form) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>' + (kind === 'signup' ? 'Creating account…' : 'Logging in…');
   try {
     const guest = REAL && REAL.profile && !Cloud.user ? REAL : null;
-    if (kind === 'signup') await Cloud.signUp({ role: AUTHF.role, name: v('name'), email, password: pw, school: v('school'), grade: v('grade'), sports: AUTHF.role === 'coach' ? AUTHF.sports.slice() : [], coachCode: v('code') });
+    const noSch = AUTHF.role === 'trainer' || (AUTHF.role === 'student' && !!($('#a-noschool') || {}).checked), sid = noSch ? '' : Cloud.schoolId(v('school')), sname = noSch ? '' : (Cloud.isKnown(sid) ? Cloud.schoolName(sid) : v('school'));
+    if (kind === 'signup') await Cloud.signUp({ role: AUTHF.role, name: v('name'), email, password: pw, school: sid, schoolName: sname, grade: noSch ? '' : v('grade'), sports: AUTHF.role === 'coach' ? AUTHF.sports.slice() : [], coachCode: v('code') });
     else await Cloud.signIn(email, pw);
     await afterSignIn(guest, kind);
   } catch (e) {
@@ -101,12 +110,13 @@ async function afterSignIn(guest, kind) {
   store.del('pulse.entry');
   Object.assign(COACH, { roster: [], pending: [], loaded: false, loading: false, err: '' });
   AUTHF = { role: 'student', sports: [] };
+  if (u.role === 'trainer') { S = REAL = null; UI.screen = null; navigate('students'); setTimeout(() => toast(`<b>Welcome, ${esc(u.name.split(' ')[0])}.</b> ${kind === 'signup' ? 'Check your email to verify it, then add your first client.' : ''}`), 300); return; }
   if (u.role === 'coach') { S = REAL = null; UI.screen = null; navigate('students'); setTimeout(() => toast(`<b>Welcome, ${esc(u.name.split(' ')[0])}.</b> ${kind === 'signup' ? 'Your coach account is ready.' : ''}`), 300); return; }
   let cloud = null;
   try { cloud = await Cloud.loadState(); } catch (e) {}
   const local = store.get(stateKey());
   let st = [cloud, local].filter(x => x && x.profile).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
-  if (!st && guest) { st = JSON.parse(JSON.stringify(guest)); st.profile.school = u.school || st.profile.school || ''; st.profile.grade = u.grade || st.profile.grade || ''; }
+  if (!st && guest) { st = JSON.parse(JSON.stringify(guest)); st.profile.school = u.school || st.profile.school || ''; st.profile.schoolName = u.schoolName || st.profile.schoolName || ''; st.profile.grade = u.grade || st.profile.grade || ''; }
   REAL = S = st ? migrateState(st) : null;
   UI.screen = null; UI.draft = null;
   if (S) { save(); Sync.now(); Sync.pullReviews(); navigate('today'); setTimeout(() => toast(guest && kind === 'signup' ? '<b>Account created.</b> Your plan moved in with you.' : `<b>Welcome back, ${esc(S.profile.name)}.</b>`), 300); }
@@ -117,7 +127,8 @@ async function signOut() {
   await Cloud.signOut();
   store.del('pulse.entry');
   Object.assign(COACH, { roster: [], pending: [], loaded: false, loading: false, err: '' });
-  Object.assign(FR, { loaded: false, loading: false, err: '', ships: [], feeds: {}, code: '', busy: false }); Sync.last = ''; Sync.lastFeed = '';
+  Object.assign(FR, { loaded: false, loading: false, err: '', ships: [], feeds: {}, code: '', busy: false }); Sync.last = ''; Sync.lastFeed = ''; Sync.lastTr = '';
+  Object.assign(TR, { loaded: false, loading: false, err: '', links: [], code: '', busy: false });
   REAL = S = null; UI.screen = null; UI.draft = null; stopRest();
   navigate('welcome');
   setTimeout(() => toast('Signed out.'), 300);
@@ -140,13 +151,13 @@ function accountCard() {
   if (S.sample) return `<div class="card-h"><h3>Account</h3></div><div class="card-b"><p class="muted">This is a sample athlete. <a href="#/welcome">Start your own</a> to create an account.</p></div>`;
   if (!u) return `<div class="acct"><span class="acct-ic">${IC.user}</span><div><b>You are using Pulse as a guest</b><p>Your plan lives only in this browser. Create an account to keep it safe, use it on your phone and laptop, and let your coaches follow your progress.</p></div>
     <div class="acct-acts"><a class="btn btn-primary" href="#/signup">Create an account</a><a class="btn btn-ghost" href="#/login">Log in</a></div></div>`;
-  return `<div class="acct"><span class="acct-ic acc">${esc(initials(u.name))}</span><div><b>${esc(u.name)}</b><p>${esc(u.email)} · ${esc(Cloud.schoolName(S.profile.school || u.school) || 'No school set')}${S.profile.grade ? ` · grade ${esc(S.profile.grade)}` : ''}</p></div>
-    <div class="acct-acts"><a class="btn btn-ghost" href="#/coach">${IC.coach}Coach access</a><a class="btn btn-ghost" href="#/friends">${IC.coach}Friends</a><button class="btn btn-quiet" data-act="sign-out">${IC.logout}Sign out</button></div></div>`;
+  return `<div class="acct"><span class="acct-ic acc">${esc(initials(u.name))}</span><div><b>${esc(u.name)}</b><p>${esc(u.email)} · ${esc(Cloud.schoolName(S.profile.school || u.school, S.profile.schoolName) || 'Not at a school')}${S.profile.grade ? ` · grade ${esc(S.profile.grade)}` : ''}</p></div>
+    <div class="acct-acts">${adultMode() ? '' : `<a class="btn btn-ghost" href="#/coach">${IC.coach}Coach access</a>`}<a class="btn btn-ghost" href="#/trainer">${IC.coach}Trainer</a><a class="btn btn-ghost" href="#/friends">${IC.coach}Friends</a><button class="btn btn-quiet" data-act="sign-out">${IC.logout}Sign out</button></div></div>`;
 }
 
 /* ---------- sync ---------- */
 const Sync = {
-  t: null, last: '', lastFeed: '', failed: false,
+  t: null, last: '', lastFeed: '', lastTr: '', failed: false,
   ok() { return Cloud.user && Cloud.user.role === 'student' && REAL && REAL.profile && !(S && S.sample); },
   schedule() { if (!this.ok()) return; clearTimeout(this.t); this.t = setTimeout(() => this.now(), 1500); },
   async now() {
@@ -161,6 +172,10 @@ const Sync = {
         const fk = JSON.stringify(Object.assign({}, fd, { updatedAt: 0 }));
         if (fk !== this.lastFeed) { await Cloud.publishFeed(fd); this.lastFeed = fk; }
       }
+      if (!TR.loaded && !TR.loading) await trLoad(true);
+      const trainerOn = TR.links.some(l => l.status === 'accepted');
+      if (trainerOn) { const td = traineeDoc(REAL), tk = JSON.stringify(Object.assign({}, td, { updatedAt: 0 })); if (tk !== this.lastTr) { await Cloud.publishTrainee(td); this.lastTr = tk; } }
+      else if (this.lastTr) { await Cloud.deleteTrainee(); this.lastTr = ''; }
       if (this.failed) toast('Back online. Everything is synced.');
       this.failed = false;
     } catch (e) {
@@ -206,3 +221,6 @@ Object.assign(ACT, {
 document.addEventListener('submit', e => { if (e.target.id === 'auth-form') { e.preventDefault(); submitAuth(e.target); } });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { Sync.pullReviews(); if (UI.screen === 'coach') coachRefresh(true); } else Sync.now(); });
 setInterval(() => Sync.pullReviews(), 120000);
+/* signup form: "I'm not at a school" hides the school and grade fields; the typed school survives switching account type */
+document.addEventListener('change', e => { if (e.target.id !== 'a-noschool') return; AUTHF.noSchool = e.target.checked; const a = $('#a-schoolbox'), b = $('#a-gradebox'); if (a) a.hidden = AUTHF.noSchool; if (b) b.hidden = AUTHF.noSchool; });
+document.addEventListener('input', e => { if (e.target.id === 'a-school') AUTHF.schoolIn = e.target.value; });

@@ -120,6 +120,13 @@ function coachDetail(st, p) {
 }
 /* ---------------- what coaches see ---------------- */
 function progressDocs(st) {
+  if (!st.profile.school) return [];
+  const base = progressBase(st);
+  return base.sports.map(sport => Object.assign({}, base, { sport }));
+}
+/* the same summary, for the one personal trainer(s) a person has linked and accepted. Works with or without a school. */
+function traineeDoc(st) { const b = progressBase(st); return Object.assign({}, b, { sport: b.sports[0] }); }
+function progressBase(st) {
   const prev = S; S = st;
   try {
     const p = st.profile, planned = trainingDays(p).length, mon = weekStart(new Date());
@@ -156,8 +163,7 @@ function progressDocs(st) {
       supps: (st.supps || []).filter(sp => ['pending', 'active', 'rejected'].includes(sp.status)).map(sp => ({ id: sp.id, name: sp.name, status: sp.status, sentAt: sp.sentAt || null, verified: !!sp.review })),
       updatedAt: st.updatedAt || Date.now()
     };
-    if (!p.school) return [];
-    return base.sports.map(sport => Object.assign({}, base, { sport }));
+    return base;
   } finally { S = prev; }
 }
 /* one student's card, as a coach sees it */
@@ -187,7 +193,7 @@ VIEWS.coach = () => {
   if (S.sample) top = `<div class="acct"><span class="acct-ic">${IC.coach}</span><div><b>This is how Aarav’s coaches see him</b><p>In your own plan, the coaches for each sport you play at your school can follow your progress here.</p></div></div>`;
   else if (!u) top = `<div class="acct"><span class="acct-ic">${IC.coach}</span><div><b>Let your coaches follow your progress</b><p>Coaches can only see students with an account. Your plan, logs and history move into the account with you.</p></div><div class="acct-acts"><a class="btn btn-primary" href="#/signup">Create an account</a><a class="btn btn-ghost" href="#/login">Log in</a></div></div>`;
   else if (!p.school) top = `<div class="acct"><span class="acct-ic">${IC.coach}</span><div><b>Add your school</b><p>Coaches find you by school and sport. Add your school and grade so they can see your progress.</p></div><div class="acct-acts"><a class="btn btn-primary" href="#/start">${IC.edit}Add school</a></div></div>`;
-  else top = `<div class="acct"><span class="acct-ic acc">${IC.shield}</span><div><b>${esc(who)} coaches at ${esc(Cloud.schoolName(p.school))} can see your progress</b><p>Grade ${esc(p.grade || '–')}. Play another sport? Add it in Edit plan inputs and that coach will see you too.</p></div><div class="acct-acts"><a class="btn btn-ghost" href="#/start">${IC.edit}Change sports</a></div></div>`;
+  else top = `<div class="acct"><span class="acct-ic acc">${IC.shield}</span><div><b>${esc(who)} coaches at ${esc(Cloud.schoolName(p.school, p.schoolName))} can see your progress</b><p>Grade ${esc(p.grade || '–')}. Play another sport? Add it in Edit plan inputs and that coach will see you too.</p></div><div class="acct-acts"><a class="btn btn-ghost" href="#/start">${IC.edit}Change sports</a></div></div>`;
   return `<div class="ph"><div><div class="label">Coach access</div><h2 style="margin-top:8px">Your <em>coaches.</em></h2><p>Coaches see how you are doing, not everything you do.</p></div></div>
     <div class="dash stagger">
       <section class="card c-12">${top}</section>
@@ -208,12 +214,15 @@ function progressDocsPreview() {
 /* ---------------- coach dashboard ---------------- */
 const COACH = { roster: [], pending: [], loaded: false, loading: false, err: '', f: { sport: 'all', grade: 'all', q: '' } };
 const COACH_VIEWS = { students: ['Students', 'coach'], verify: ['Verify notes', 'shield'], results: ['Results', 'medal'], account: ['Account', 'profile'] };
+const TRAINER_VIEWS = { students: ['Clients', 'coach'], account: ['Account', 'profile'] };
+const viewsFor = () => Cloud.user && Cloud.user.role === 'trainer' ? TRAINER_VIEWS : COACH_VIEWS;
 async function coachLoad() {
   COACH.loading = true;
   try {
     const raw = await Cloud.coachRoster(), by = {};
     raw.forEach(d => { if (!by[d.uid]) by[d.uid] = Object.assign({}, d); });
     COACH.roster = Object.values(by).sort((a, b) => b.flags.length - a.flags.length || a.name.localeCompare(b.name));
+    if (Cloud.user.role === 'trainer') { TR.links = await Cloud.myLinks(); TR.loaded = true; COACH.pending = []; COACH.err = ''; COACH.loaded = true; COACH.loading = false; return; }
     const pend = [];
     COACH.roster.forEach(d => (d.supps || []).filter(s => s.status === 'pending').forEach(s => pend.push({ stu: d, s })));
     await Promise.all(pend.map(async x => { try { x.review = await Cloud.getReview(x.s.id); if (x.review && x.review.at < (x.s.sentAt || 0)) x.review = null; } catch (e) {} }));
@@ -224,22 +233,22 @@ async function coachLoad() {
 async function coachRefresh(silent) { if (UI.screen !== 'coach') return; if (!silent) { COACH.loaded = false; coachDraw(); } await coachLoad(); coachDraw(); }
 function showCoachApp(path) {
   const { q } = parseHash();
-  const view = COACH_VIEWS[path] || path === 'student' ? path : 'students';
+  const V = viewsFor(), isT = Cloud.user.role === 'trainer', view = V[path] || path === 'student' ? path : 'students';
   if (path !== view) history.replaceState(null, '', '#/' + view);
   const u = Cloud.user, first = UI.screen !== 'coach';
   UI.coachView = view; UI.coachStu = q.get('id');
   if (first) {
     setScreen('coach', `<div class="app-wrap"><div class="app">
       <aside class="side" aria-label="Main">
-        <a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse <span class="pill line" style="margin-left:4px">Coach</span></a>
-        <nav class="side-nav">${Object.entries(COACH_VIEWS).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t}</span><span class="badge" ${v === 'verify' ? 'id="v-badge"' : ''}></span></a>`).join('')}</nav>
-        <div class="side-block"><b>${esc(u.name)}</b><div class="muted" style="font-size:12.5px;margin-top:4px">${esc(Cloud.schoolName(u.school))}</div><div class="muted" style="font-size:12.5px">${esc((u.sports || []).map(s => s === 'general' ? 'PE' : SPORTS[s].split(' (')[0]).join(', '))}</div></div>
-        <div class="side-foot"><span class="save-state"><span class="dot"></span>${Cloud.mode === 'firebase' ? 'Coach account' : 'Coach · demo mode'}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
+        <a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse <span class="pill line" style="margin-left:4px">${isT ? 'Trainer' : 'Coach'}</span></a>
+        <nav class="side-nav">${Object.entries(V).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t}</span><span class="badge" ${v === 'verify' ? 'id="v-badge"' : ''}></span></a>`).join('')}</nav>
+        <div class="side-block"><b>${esc(u.name)}</b>${isT ? `<div class="muted" style="font-size:12.5px;margin-top:4px">${esc(u.email)}</div>` : `<div class="muted" style="font-size:12.5px;margin-top:4px">${esc(Cloud.schoolName(u.school))}</div><div class="muted" style="font-size:12.5px">${esc((u.sports || []).map(s => s === 'general' ? 'PE' : SPORTS[s].split(' (')[0]).join(', '))}</div>`}</div>
+        <div class="side-foot"><span class="save-state"><span class="dot"></span>${Cloud.mode === 'firebase' ? (isT ? 'Trainer account' : 'Coach account') : (isT ? 'Trainer · demo mode' : 'Coach · demo mode')}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
       </aside>
       <div class="main"><header class="topbar" id="topbar"><a class="brand" href="#/students"><span class="brand-mark">${IC.mark}</span>Pulse</a><h1 class="pg" id="pg-title"></h1>
         <div class="topbar-r"><button class="icon-btn" data-act="coach-reload" aria-label="Refresh" data-tip="Refresh">${IC.reset}</button><button class="icon-btn" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button><a class="top-avatar" href="#/account" aria-label="Account">${esc(initials(u.name))}</a></div></header>
         <main class="content" id="main" tabindex="-1"></main></div></div>
-      <nav class="tabbar" aria-label="Main" style="grid-template-columns:repeat(4,1fr)">${Object.entries(COACH_VIEWS).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t.split(' ')[0]}</span></a>`).join('')}</nav></div>`);
+      <nav class="tabbar" aria-label="Main" style="grid-template-columns:repeat(${Object.keys(V).length},1fr)">${Object.entries(V).map(([v, [t, ic]]) => `<a href="#/${v}" data-cnav="${v}">${IC[ic]}<span>${t.split(' ')[0]}</span></a>`).join('')}</nav></div>`);
   }
   coachDraw();
   if (!COACH.loaded && !COACH.loading) coachLoad().then(coachDraw);
@@ -250,12 +259,13 @@ function coachDraw() {
   $$('[data-cnav]').forEach(a => a.dataset.cnav === (v === 'student' ? 'students' : v) ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
   const open = COACH.pending.filter(x => !x.review).length;
   $$('#v-badge').forEach(b => b.innerHTML = open ? `<span class="pill acc">${open}</span>` : '');
-  $('#pg-title').textContent = v === 'student' ? 'Student' : COACH_VIEWS[v][0];
+  const isT = Cloud.user.role === 'trainer';
+  $('#pg-title').textContent = v === 'student' ? (isT ? 'Client' : 'Student') : viewsFor()[v][0];
   document.title = ($('#pg-title').textContent) + ' · Pulse Coach';
   const c = $('#main');
   c.innerHTML = !COACH.loaded ? `<div class="empty" style="padding:80px 8px"><span class="spin lg"></span><h4>Loading your students…</h4></div>`
     : COACH.err ? `<div class="card"><div class="empty"><div class="glyph">${IC.alert}</div><h4>Could not load</h4><p>${esc(COACH.err)}</p><div class="acts"><button class="btn btn-primary btn-sm" data-act="coach-reload">Try again</button></div></div></div>`
-    : ({ students: coachStudents, student: coachStudent, verify: coachVerify, results: resCoachView, account: coachAccount }[v])();
+    : (isT ? { students: trainerClients, student: coachStudent, account: trainerAccount } : { students: coachStudents, student: coachStudent, verify: coachVerify, results: resCoachView, account: coachAccount })[v]();
   animateIn(c); bindChartTips(c);
 }
 function coachStudents() {
@@ -285,7 +295,7 @@ function coachStudent() {
   const [k, l] = statusFor(d.goal, d.weight.status), pts = (d.weight.series || []).map(([date, kg]) => ({ date, kg }));
   const pend = COACH.pending.filter(x => x.stu.uid === d.uid);
   return `<div class="ph"><div class="prof-head"><span class="avatar">${esc(initials(d.name))}</span><div><h2>${esc(d.name)}</h2><p style="margin-top:2px">${d.grade ? 'Grade ' + esc(d.grade) + ' · ' : ''}${d.age} yrs · ${esc(GOALS[d.goal].label)} · ${esc(d.sports.map(s => s === 'general' ? 'PE' : SPORTS[s].split(' (')[0]).join(', '))}</p></div></div>
-      <div class="ph-actions"><a class="btn btn-ghost btn-sm" href="#/students">${IC.back}All students</a></div></div>
+      <div class="ph-actions"><a class="btn btn-ghost btn-sm" href="#/students">${IC.back}${Cloud.user.role === 'trainer' ? 'All clients' : 'All students'}</a></div></div>
     <div class="stats stagger" style="margin-bottom:16px">
       <div><span class="label">This week</span><b>${d.weeks[3].done}<small>/ ${d.planned}</small></b><span class="delta">sessions</span></div>
       <div><span class="label">Last 4 weeks</span><b>${d.adherence}<small>%</small></b><span class="delta">of planned sessions</span></div>
@@ -335,8 +345,10 @@ function coachVerify() {
 }
 function coachAccount() {
   const u = Cloud.user;
+  Cloud.schoolCode().then(c => { const el = $('#sc-code'); if (el) el.textContent = c || 'Not available'; }).catch(() => {});
   return `<div class="ph"><div class="prof-head"><span class="avatar">${esc(initials(u.name))}</span><div><h2>${esc(u.name)}</h2><p style="margin-top:2px">${esc(u.email)} · ${esc(Cloud.schoolName(u.school))}</p></div></div></div>
     <div class="dash"><section class="card c-7"><div class="card-h"><h3>Sports you coach</h3><span class="label">Students who play these appear on your list</span></div><div class="card-b"><div class="chips">${[['general', 'PE / general fitness'], ...Object.entries(SPORTS)].map(([v, l]) => `<button class="chip" data-act="coach-sport" data-v="${v}" aria-pressed="${(u.sports || []).includes(v)}"><span class="ck">${IC.check}</span>${esc(l.split(' (')[0])}</button>`).join('')}</div></div></section>
+      <section class="card c-7"><div class="card-h"><h3>Your school’s coach code</h3><span class="label">${esc(Cloud.schoolName(u.school))}</span></div><div class="card-b"><div class="fr-code" id="sc-code" aria-live="polite">…</div><p class="muted" style="font-size:13px;margin-top:8px">Share this only with other coaches at your school. They type it when they create a coach account for ${esc(Cloud.schoolName(u.school))}.</p></div></section>
       <section class="card c-5"><div class="card-h"><h3>Account</h3></div><div class="card-b settings">
         <div class="set-row"><div><b>Appearance</b><span>Light or dark</span></div><button class="btn btn-ghost btn-sm" data-act="theme">${isDark() ? IC.sun : IC.moon}Switch</button></div>
         <div class="set-row"><div><b>Sign out</b><span>On this device</span></div><button class="btn btn-ghost btn-sm" data-act="sign-out">${IC.logout}Sign out</button></div></div></section>

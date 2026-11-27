@@ -3,7 +3,11 @@
    ========================================================= */
 
 const LS = 'pulse.v3', LS_DRAFT = 'pulse.draft', LS_PREFS = 'pulse.prefs', LS_THEME = 'pulse.theme';
-const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'results', 'profile'];
+const APP_VIEWS = ['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach', 'friends', 'trainer', 'results', 'profile'];
+/* someone who is not at a school (university, or an adult) never sees the school-only tabs */
+const adultMode = () => !!(S && S.profile && !S.sample && !S.profile.school);
+const SCHOOL_ONLY = ['coach', 'results'];
+const navViews = () => APP_VIEWS.filter(v => !(adultMode() && SCHOOL_ONLY.includes(v)));
 const LANDING_SECTIONS = ['method', 'product', 'block', 'science', 'faq'];
 const VIEW_META = {
   today: { t: 'Today', ic: 'today' },
@@ -14,6 +18,7 @@ const VIEW_META = {
   ask: { t: 'Ask Pulse', ic: 'chat' },
   coach: { t: 'Coach', ic: 'coach' },
   friends: { t: 'Friends', ic: 'coach' },
+  trainer: { t: 'Trainer', ic: 'shield' },
   results: { t: 'Results', ic: 'medal' },
   profile: { t: 'Profile', ic: 'profile' }
 };
@@ -50,7 +55,7 @@ function freshState(profile) {
 }
 function blankDraft() {
   const u = Cloud.user || {};
-  return { name: u.name ? String(u.name).split(' ')[0] : '', age: '', sex: 'm', height: '', weight: '', climate: 'mild', school: u.school || ((PULSE_CONFIG.schools || [])[0] || {}).id || '', grade: u.grade || '', goal: '', extra: [], sports: [], exp: 'beg', sessions: 3, minutes: 45, days: [], where: 'school', gear: [], equip: [], diet: 'all', allergies: '', injuries: '' };
+  return { name: u.name ? String(u.name).split(' ')[0] : '', age: '', sex: 'm', height: '', weight: '', climate: 'mild', school: u.school || '', schoolName: u.schoolName || '', noSchool: false, grade: u.grade || '', goal: '', extra: [], sports: [], exp: 'beg', sessions: 3, minutes: 45, days: [], where: 'school', gear: [], equip: [], diet: 'all', allergies: '', injuries: '' };
 }
 function sampleState() {
   const created = addDays(mondayOf(new Date()), -14);
@@ -202,12 +207,13 @@ function route() {
 
   if (path === 'welcome') { leaveSample(); return showWelcome(); }
   if (path === 'login' || path === 'signup') { leaveSample(); return showAuth(path); }
-  if (Cloud.user && Cloud.user.role === 'coach' && path !== 'about' && !LANDING_SECTIONS.includes(path)) { leaveSample(); return showCoachApp(path); }
+  if (Cloud.user && (Cloud.user.role === 'coach' || Cloud.user.role === 'trainer') && path !== 'about' && !LANDING_SECTIONS.includes(path)) { leaveSample(); return showCoachApp(path); }
   if (path === 'sample') { stopRest(); S = sampleState(); setSampleFlag(true); UI.planWeek = UI.planDay = null; UI.screen = null; history.replaceState(null, '', '#/today'); return showApp('today'); }
   if (path === 'start') { leaveSample(); if (!entered()) return showWelcome(); return showOnboarding(); }
   if (path === 'videocheck') return showVideoCheck();
   if (APP_VIEWS.includes(path)) {
     if (!hasPlan() && sampleFlag()) S = sampleState();
+    if (SCHOOL_ONLY.includes(path) && REAL && REAL.profile && !sampleFlag() && !REAL.profile.school) { history.replaceState(null, '', '#/today'); return route(); }
     if (!hasPlan()) { S = REAL; }
     if (!hasPlan()) { if (!entered()) return showWelcome(); toast('Build your plan first. It takes about two minutes.'); history.replaceState(null, '', '#/start'); return showOnboarding(); }
     return showApp(path);
@@ -293,21 +299,20 @@ function numField(k, label, suffix, ph, min, max) {
     <div class="input-wrap"><input class="input num" id="f-${k}" data-f="${k}" type="number" inputmode="decimal" placeholder="${ph}" min="${min}" max="${max}" value="${esc(UI.draft[k])}" ${UI.errors[k] ? `aria-invalid="true" aria-describedby="err-${k}"` : ''}><span class="suffix">${suffix}</span></div>${fieldErr(k)}</div>`;
 }
 function obStepHTML() {
-  const d = UI.draft, k = OB[UI.obStep].k;
+  const d = UI.draft, k = OB[UI.obStep].k, noSch = !!d.noSchool;
   if (k === 'you') return `
     <div class="field ${UI.errors.name ? 'err' : ''}" data-field="name"><label for="f-name">First name <span class="hint">Shown on your plan</span></label>
       <input class="input" id="f-name" data-f="name" type="text" autocomplete="given-name" maxlength="24" placeholder="e.g. Maya" value="${esc(d.name)}" ${UI.errors.name ? 'aria-invalid="true" aria-describedby="err-name"' : ''}>${fieldErr('name')}</div>
-    <div class="grid-3">${numField('age', 'Age', 'yrs', '16', 12, 25)}${numField('height', 'Height', 'cm', '170', 120, 220)}${numField('weight', 'Weight', 'kg', '60', 30, 150)}</div>
+    <div class="grid-3">${numField('age', 'Age', 'yrs', '16', 12, noSch ? 90 : 25)}${numField('height', 'Height', 'cm', '170', 120, 220)}${numField('weight', 'Weight', 'kg', '60', 30, 150)}</div>
     <div class="grid-2">
       <div class="field"><span class="flabel">Sex <span class="hint">For energy maths</span></span>${seg('sex', [['m', 'Male'], ['f', 'Female']], d.sex, 'full')}</div>
       <div class="field"><span class="flabel">Climate <span class="hint">Sets water</span></span>${seg('climate', [['mild', 'Mild'], ['hot', 'Hot']], d.climate, 'full')}</div>
     </div>
-    <div class="grid-2">
-      <div class="field ${UI.errors.school ? 'err' : ''}" data-field="school"><label for="f-school">School <span class="hint">${Cloud.user ? 'So your coaches can follow you' : 'Optional for guests'}</span></label>
-        <select class="input" id="f-school" data-f="school"><option value="">Not at a listed school</option>${(PULSE_CONFIG.schools || []).map(sc => `<option value="${esc(sc.id)}" ${d.school === sc.id ? 'selected' : ''}>${esc(sc.name)}</option>`).join('')}</select>${fieldErr('school')}</div>
-      <div class="field ${UI.errors.grade ? 'err' : ''}" data-field="grade"><label for="f-grade">Grade</label>
-        <select class="input" id="f-grade" data-f="grade"><option value="">Choose</option>${(PULSE_CONFIG.grades || []).map(g => `<option value="${g}" ${String(d.grade) === g ? 'selected' : ''}>Grade ${g}</option>`).join('')}</select>${fieldErr('grade')}</div>
-    </div>`;
+    <div class="field ${UI.errors.school ? 'err' : ''}" data-field="school" id="f-schoolbox" ${d.noSchool ? 'hidden' : ''}><label for="f-school">School <span class="hint">Type your school’s name. Any school works, and your coaches there can follow you.</span></label>
+      <input class="input" id="f-school" data-f="schoolName" list="f-school-list" type="text" autocomplete="organization" maxlength="80" placeholder="e.g. Vasant Valley School" value="${esc(d.schoolName || Cloud.schoolName(d.school) || '')}" ${UI.errors.school ? 'aria-invalid="true" aria-describedby="err-school"' : ''}><datalist id="f-school-list">${(PULSE_CONFIG.schools || []).map(sc => `<option value="${esc(sc.name)}"></option>`).join('')}</datalist>${fieldErr('school')}</div>
+    <label class="chk"><input type="checkbox" id="f-noschool" ${d.noSchool ? 'checked' : ''}><span>I’m not at a school (university, or an adult). Pulse hides the coach and school-results tabs.</span></label>
+    <div class="field ${UI.errors.grade ? 'err' : ''}" data-field="grade" id="f-gradebox" ${d.noSchool ? 'hidden' : ''}><label for="f-grade">Grade</label>
+      <select class="input" id="f-grade" data-f="grade"><option value="">Choose</option>${(PULSE_CONFIG.grades || []).map(g => `<option value="${g}" ${String(d.grade) === g ? 'selected' : ''}>Grade ${g}</option>`).join('')}</select>${fieldErr('grade')}</div>`;
   if (k === 'goal') return `
     <div class="field ${UI.errors.goal ? 'err' : ''}" data-field="goal"><span class="flabel">Main goal</span>
       <div class="opt-list" role="radiogroup" aria-label="Main goal">${Object.entries(GOALS).map(([v, g]) => `<button type="button" class="opt" role="radio" data-act="ob-set" data-f="goal" data-v="${v}" aria-checked="${d.goal === v}"><span class="rad"></span><span><b>${g.label}</b><span class="d">${g.line}</span></span><span class="tag">${SCHEME[v].comp} reps</span></button>`).join('')}</div>${fieldErr('goal')}</div>
@@ -383,12 +388,14 @@ function validateStep(i) {
   const k = OB[i].k;
   if (k === 'you') {
     if (!String(d.name).trim()) e.name = 'Add your first name.';
-    if (d.age === '' || isNaN(d.age)) e.age = 'Add your age.'; else if (d.age < 12 || d.age > 25) e.age = 'Pulse is built for ages 12 to 25.';
+    if (d.age === '' || isNaN(d.age)) e.age = 'Add your age.'; else if (d.age < 12 || d.age > (d.noSchool ? 90 : 25)) e.age = d.noSchool ? 'Use an age from 12 to 90.' : 'Pulse is built for ages 12 to 25 at school. Not at a school? Tick that box below.';
     if (d.height === '' || isNaN(d.height)) e.height = 'Add your height.'; else if (d.height < 120 || d.height > 220) e.height = 'Use 120 to 220 cm.';
     if (d.weight === '' || isNaN(d.weight)) e.weight = 'Add your weight.'; else if (d.weight < 30 || d.weight > 150) e.weight = 'Use 30 to 150 kg.';
   }
-  if (k === 'you' && Cloud.user && !d.school) e.school = 'Pick your school so your coaches can see your progress.';
-  if (k === 'you' && Cloud.user && !d.grade) e.grade = 'Pick your grade.';
+  if (k === 'you' && !d.noSchool) {
+    if (!d.school) e.school = 'Type your school’s name, or tick “I’m not at a school”.';
+    if (!d.grade) e.grade = 'Pick your grade.';
+  }
   if (k === 'kit' && d.where !== 'none' && !(d.gear || []).length) e.gear = 'Tap at least one piece of equipment, or choose No equipment.';
   if (k === 'goal' && !d.goal) e.goal = 'Pick a main goal to continue.';
   if (k === 'week' && d.days.length && d.days.length !== +d.sessions) e.days = `Pick ${d.sessions} days, or clear them all and Pulse will choose.`;
@@ -409,7 +416,7 @@ function obNext() {
 function finishOnboarding() {
   for (let i = 0; i < OB.length; i++) { const e = validateStep(i); if (Object.keys(e).length) { UI.obStep = i; UI.errors = e; drawObStep(); return; } }
   const d = UI.draft;
-  const profile = { name: String(d.name).trim(), age: +d.age, sex: d.sex, height: +d.height, weight: +d.weight, climate: d.climate, goal: d.goal, extra: d.extra.filter(x => x !== d.goal).slice(0, 2), sports: d.sports.slice(0, 3), exp: d.exp, sessions: +d.sessions, minutes: +d.minutes, days: d.days.slice().sort((a, b) => a - b), where: d.where, gear: d.where === 'none' ? [] : (d.gear || []).slice(), equip: [], school: d.school || '', grade: d.grade || '', diet: d.diet, allergies: String(d.allergies).trim(), injuries: String(d.injuries).trim() };
+  const profile = { name: String(d.name).trim(), age: +d.age, sex: d.sex, height: +d.height, weight: +d.weight, climate: d.climate, goal: d.goal, extra: d.extra.filter(x => x !== d.goal).slice(0, 2), sports: d.sports.slice(0, 3), exp: d.exp, sessions: +d.sessions, minutes: +d.minutes, days: d.days.slice().sort((a, b) => a - b), where: d.where, gear: d.where === 'none' ? [] : (d.gear || []).slice(), equip: [], school: d.noSchool ? '' : (d.school || ''), schoolName: d.noSchool ? '' : (Cloud.isKnown(d.school) ? Cloud.schoolName(d.school) : String(d.schoolName || '').trim()), grade: d.noSchool ? '' : (d.grade || ''), diet: d.diet, allergies: String(d.allergies).trim(), injuries: String(d.injuries).trim() };
   const rebuilding = UI.rebuilding && REAL && REAL.profile;
   if (rebuilding) {
     profile.createdAt = REAL.profile.createdAt; profile.startDate = REAL.profile.startDate || iso(new Date(REAL.profile.createdAt));
@@ -421,7 +428,7 @@ function finishOnboarding() {
   }
   if (rebuilding) { profile.kcalAdj = REAL.profile.kcalAdj || 0; profile.rpeAdj = REAL.profile.rpeAdj || 0; }
   save(); store.del(LS_DRAFT);
-  if (Cloud.user) Cloud.updateProfile({ school: profile.school, grade: profile.grade, sports: profile.sports, name: profile.name }).catch(() => {});
+  if (Cloud.user) Cloud.updateProfile({ school: profile.school, schoolName: profile.schoolName, grade: profile.grade, sports: profile.sports, name: profile.name }).catch(() => {});
   UI.draft = null; UI.rebuilding = false; UI.planWeek = UI.planDay = null;
   showBuilding(rebuilding);
 }
@@ -465,7 +472,7 @@ function showApp(view) {
         <aside class="side" aria-label="Main">
           <a class="brand" href="#/" aria-label="Pulse home"><span class="brand-mark">${IC.mark}</span>Pulse</a>
           <button class="side-search" data-act="cmdk" type="button">${IC.search}<span>Search or jump</span><span class="kbd">${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} K</span></button>
-          <nav class="side-nav">${APP_VIEWS.map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${VIEW_META[v].t}</span><span class="badge"></span></a>`).join('')}</nav>
+          <nav class="side-nav">${navViews().map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${VIEW_META[v].t}</span><span class="badge"></span></a>`).join('')}</nav>
           <div class="side-block" id="side-block"></div>
           <div class="side-foot"><span class="save-state">${S.sample ? '<span class="dot" style="background:var(--warn)"></span>Sample, not saved' : Cloud.user ? `<span class="dot"></span>${Cloud.mode === 'firebase' ? 'Synced to your account' : 'Signed in (demo mode)'}` : '<span class="dot" style="background:var(--ink-4)"></span>Guest · saved on this device'}</span><button class="icon-btn sm" data-act="theme" data-theme-ic aria-label="Toggle dark mode">${isDark() ? IC.sun : IC.moon}</button></div>
         </aside>
@@ -482,7 +489,7 @@ function showApp(view) {
           <main class="content" id="main" tabindex="-1"></main>
         </div>
       </div>
-      <nav class="tabbar" aria-label="Main">${['today', 'plan', 'session', 'fuel', 'progress', 'ask', 'coach'].map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${v === 'ask' ? 'Ask' : VIEW_META[v].t}</span></a>`).join('')}</nav>
+      <nav class="tabbar" aria-label="Main">${['today', 'plan', 'session', 'fuel', 'progress', 'ask', adultMode() ? 'trainer' : 'coach'].map(v => `<a href="#/${v}" data-nav="${v}">${IC[VIEW_META[v].ic]}<span>${v === 'ask' ? 'Ask' : VIEW_META[v].t}</span></a>`).join('')}</nav>
     </div>`);
     const tb = $('#topbar');
     const onScroll = () => tb && tb.classList.toggle('scrolled', scrollY > 4);
@@ -892,7 +899,7 @@ VIEWS.progress = () => {
   const zone = r == null ? null : r < 0.8 ? ['Under-loaded', 'Training is lighter than usual. Fine in a deload, otherwise add a session.'] : r <= 1.3 ? ['Sweet spot', 'This week matches what your body is used to. Good place to be.'] : r <= 1.5 ? ['Caution', 'Load is climbing quickly. Sleep and eat well this week.'] : ['Spike', 'This week is well above your recent average. Injury risk climbs here, so ease off.'];
   const hist = (UI.histFilter === 'block' ? inBlock : ss).slice().reverse();
   const pb = bests().slice(0, 6), got = S.badges || {};
-  return `<div class="ph"><div><div class="label">${plural(ss.length, 'session')} logged</div><h2 style="margin-top:8px">Your <em>progress.</em></h2></div><div class="ph-actions"><a class="btn btn-ghost btn-sm" href="#/results">${IC.medal}School results</a></div></div>
+  return `<div class="ph"><div><div class="label">${plural(ss.length, 'session')} logged</div><h2 style="margin-top:8px">Your <em>progress.</em></h2></div>${adultMode() ? '' : `<div class="ph-actions"><a class="btn btn-ghost btn-sm" href="#/results">${IC.medal}School results</a></div>`}</div>
     ${(S.pins || []).length ? `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>My school pins</h3></div><div class="card-b">${S.pins.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0"><div><b>${esc(p.title)}</b><div class="muted" style="font-size:13px">${esc(fmtDate(p.date))}</div></div>${pinPill(p.pin)}</div>`).join('')}</div></div>` : ''}
     <div class="stats stagger" style="margin-bottom:16px">
       <div><span class="label">This block</span><b>${inBlock.length}<small>/ ${planned * weeksIn}</small></b><span class="delta">sessions so far</span></div>
@@ -938,7 +945,7 @@ VIEWS.profile = () => {
           ['Body', `${p.height} cm · ${p.weight} kg · ${p.sex === 'f' ? 'female' : 'male'}`],
           ['Goal', GOALS[p.goal].label + (p.extra.length ? ' + ' + p.extra.map(x => GOALS[x].label.toLowerCase()).join(', ') : '')],
           ['Week', `${p.sessions} × ${p.minutes} min · ${trainingDays(p).map(i => DAYS[i]).join(' ')}`],
-          ['School', p.school ? Cloud.schoolName(p.school) + (p.grade ? ` · grade ${p.grade}` : '') : 'Not set'],
+          ['School', p.school ? Cloud.schoolName(p.school, p.schoolName) + (p.grade ? ` · grade ${p.grade}` : '') : 'Not set'],
           ['Where', where + (p.where !== 'none' ? ` · ${plural((p.gear || []).length || (p.equip || []).length, 'piece')} of equipment` : '')],
           ['Level', { beg: 'New to lifting', int: 'Some experience', adv: 'Experienced' }[p.exp]],
           ['Diet', DIET_LABEL[p.diet] + (p.allergies ? ` · avoids ${p.allergies}` : '')],
@@ -1094,6 +1101,7 @@ document.addEventListener('input', e => {
   if (t.dataset.f && UI.screen === 'onboard') {
     const num = t.type === 'number';
     UI.draft[t.dataset.f] = num ? (t.value === '' ? '' : +t.value) : t.value;
+    if (t.dataset.f === 'schoolName') { UI.draft.school = Cloud.schoolId(t.value); if (UI.errors.school) { delete UI.errors.school; const f = t.closest('.field'); f.classList.remove('err'); const er = f.querySelector('.error'); er && er.remove(); } }
     if (UI.errors[t.dataset.f]) { delete UI.errors[t.dataset.f]; const f = t.closest('.field'); f.classList.remove('err'); t.removeAttribute('aria-invalid'); const er = f.querySelector('.error'); er && er.remove(); }
     saveDraft(); $('.ob-side').innerHTML = obSide();
   }
@@ -1103,6 +1111,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.id === 'f-noschool' && UI.draft) { UI.draft.noSchool = t.checked; if (t.checked) { UI.errors.school = UI.errors.grade = undefined; delete UI.errors.school; delete UI.errors.grade; } saveDraft(); drawObStep(); const n = $('#f-noschool'); n && n.focus(); }
   if (t.id === 'food-sort') { UI.foodSort = t.value; redrawFoodSearch(); }
   if (t.id === 'import-file' && t.files[0]) importFile(t.files[0]);
 });
