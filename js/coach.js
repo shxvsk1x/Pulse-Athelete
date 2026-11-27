@@ -213,6 +213,7 @@ function progressDocsPreview() {
 
 /* ---------------- coach dashboard ---------------- */
 const COACH = { roster: [], pending: [], loaded: false, loading: false, err: '', f: { sport: 'all', grade: 'all', q: '' } };
+const COACH_EXTRA = {};   // views added by later scripts: name -> function
 const COACH_VIEWS = { students: ['Students', 'coach'], verify: ['Verify notes', 'shield'], results: ['Results', 'medal'], account: ['Account', 'profile'] };
 const TRAINER_VIEWS = { students: ['Clients', 'coach'], account: ['Account', 'profile'] };
 const viewsFor = () => Cloud.user && Cloud.user.role === 'trainer' ? TRAINER_VIEWS : COACH_VIEWS;
@@ -265,6 +266,7 @@ function coachDraw() {
   const c = $('#main');
   c.innerHTML = !COACH.loaded ? `<div class="empty" style="padding:80px 8px"><span class="spin lg"></span><h4>Loading your students…</h4></div>`
     : COACH.err ? `<div class="card"><div class="empty"><div class="glyph">${IC.alert}</div><h4>Could not load</h4><p>${esc(COACH.err)}</p><div class="acts"><button class="btn btn-primary btn-sm" data-act="coach-reload">Try again</button></div></div></div>`
+    : COACH_EXTRA[v] ? COACH_EXTRA[v]()
     : (isT ? { students: trainerClients, student: coachStudent, account: trainerAccount } : { students: coachStudents, student: coachStudent, verify: coachVerify, results: resCoachView, account: coachAccount })[v]();
   animateIn(c); bindChartTips(c);
 }
