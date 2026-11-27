@@ -210,7 +210,7 @@ function route() {
 
   if (path === 'welcome') { leaveSample(); return showWelcome(); }
   if (path === 'login' || path === 'signup') { leaveSample(); return showAuth(path); }
-  if (Cloud.user && (Cloud.user.role === 'coach' || Cloud.user.role === 'trainer') && path !== 'about' && !LANDING_SECTIONS.includes(path)) { leaveSample(); return showCoachApp(path); }
+  if (Cloud.user && (Cloud.user.role === 'coach' || Cloud.user.role === 'trainer' || Cloud.user.role === 'parent') && path !== 'about' && !LANDING_SECTIONS.includes(path)) { leaveSample(); return showCoachApp(path); }
   if (path === 'sample') { stopRest(); S = sampleState(); setSampleFlag(true); UI.planWeek = UI.planDay = null; UI.screen = null; history.replaceState(null, '', '#/today'); return showApp('today'); }
   if (path === 'start') { leaveSample(); if (!entered()) return showWelcome(); return showOnboarding(); }
   if (path === 'videocheck') return showVideoCheck();

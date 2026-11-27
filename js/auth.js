@@ -38,13 +38,13 @@ function showAuth(kind) {
   const schools = PULSE_CONFIG.schools || [];
   const sel = (id, label, opts, val, hint = '') => `<div class="field" data-field="${id}"><label for="a-${id}">${label}${hint ? ` <span class="hint">${hint}</span>` : ''}</label><select class="input" id="a-${id}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
   const fld = (id, label, type, ph, ac, extra = '') => `<div class="field" data-field="${id}"><label for="a-${id}">${label}</label><div class="input-wrap">${`<input class="input" id="a-${id}" type="${type}" placeholder="${ph}" autocomplete="${ac}" ${extra}>`}${type === 'password' ? `<button type="button" class="pw-eye" data-act="pw-eye" aria-label="Show password">${IC.eye.replace('<svg', '<svg width="16" height="16"')}</button>` : ''}</div></div>`;
-  const coach = AUTHF.role === 'coach', trainer = AUTHF.role === 'trainer';
+  const coach = AUTHF.role === 'coach', parent = AUTHF.role === 'parent', trainer = AUTHF.role === 'trainer' || parent;
   const form = kind === 'signup' ? `
-      <div class="seg full" role="radiogroup" aria-label="Account type">${[['student', 'I’m an athlete'], ['coach', 'I’m a coach'], ['trainer', 'I’m a trainer']].map(([v, l]) => `<button type="button" role="radio" data-act="auth-role" data-v="${v}" aria-checked="${AUTHF.role === v}">${l}</button>`).join('')}</div>
+      <div class="seg full" role="radiogroup" aria-label="Account type">${[['student', 'I’m an athlete'], ['coach', 'I’m a coach'], ['trainer', 'I’m a trainer'], ['parent', 'I’m a parent']].map(([v, l]) => `<button type="button" role="radio" data-act="auth-role" data-v="${v}" aria-checked="${AUTHF.role === v}">${l}</button>`).join('')}</div>
       ${fld('name', 'Full name', 'text', coach ? 'e.g. Ms Rhea Kapoor' : 'e.g. Maya Sharma', 'name', 'maxlength="40"')}
       ${fld('email', 'Email', 'email', trainer ? 'you@example.com' : 'you@school.edu', 'email')}
       ${fld('pw', 'Password', 'password', 'At least 6 characters', 'new-password')}
-      ${trainer ? `<p class="muted" style="font-size:13.5px">Pulse sends a link to your email to verify it. Your clients see that verified email when you ask to follow them, and they must accept before you see anything.</p>` : `
+      ${parent ? `<p class="muted" style="font-size:13.5px">Pulse sends a link to your email to verify it. Only a verified parent or guardian account can approve a child under 18 to share progress with coaches. Use the same email your child enters when they ask you.</p>` : trainer ? `<p class="muted" style="font-size:13.5px">Pulse sends a link to your email to verify it. Your clients see that verified email when you ask to follow them, and they must accept before you see anything.</p>` : `
       <div class="field" data-field="school" id="a-schoolbox" ${AUTHF.noSchool && !coach ? 'hidden' : ''}><label for="a-school">School <span class="hint">${coach ? 'Type your school’s name' : 'Type your school’s name, any school is fine'}</span></label>
         <input class="input" id="a-school" list="a-school-list" type="text" placeholder="e.g. Vasant Valley School" autocomplete="organization" maxlength="80" value="${esc(AUTHF.schoolIn || '')}"><datalist id="a-school-list">${schools.map(sc => `<option value="${esc(sc.name)}"></option>`).join('')}</datalist></div>
       ${coach ? fld('code', 'Coach access code', 'text', 'New school? Choose one. Joining? Ask your head coach.', 'off', 'autocapitalize="characters"')
@@ -56,8 +56,8 @@ function showAuth(kind) {
       <button type="button" class="link-tip" data-act="auth-forgot" style="justify-self:start">Forgot your password?</button>`;
   setScreen('auth', authShell(`<div class="auth-box">
       <a class="btn btn-quiet btn-sm auth-back" href="#/welcome">${IC.back}<span>Back</span></a>
-      <div class="label">${kind === 'signup' ? (coach ? 'Coach account' : trainer ? 'Trainer account' : 'Athlete account') : 'Welcome back'}</div>
-      <h1>${kind === 'signup' ? (coach ? 'Follow your <em>athletes.</em>' : trainer ? 'Follow your <em>clients.</em>' : 'Create your <em>account.</em>') : 'Log in to <em>Pulse.</em>'}</h1>
+      <div class="label">${kind === 'signup' ? (coach ? 'Coach account' : parent ? 'Parent account' : trainer ? 'Trainer account' : 'Athlete account') : 'Welcome back'}</div>
+      <h1>${kind === 'signup' ? (coach ? 'Follow your <em>athletes.</em>' : parent ? 'Approve your <em>child.</em>' : trainer ? 'Follow your <em>clients.</em>' : 'Create your <em>account.</em>') : 'Log in to <em>Pulse.</em>'}</h1>
       <form class="auth-form" id="auth-form" data-kind="${kind}" novalidate>${form}
         <div class="form-err" id="auth-err" role="alert" hidden></div>
         <button class="btn btn-primary btn-lg" type="submit" id="auth-go">${kind === 'signup' ? 'Create account' : 'Log in'} ${IC.arrow}</button>
@@ -82,7 +82,7 @@ async function submitAuth(form) {
     if (!Cloud.validEmail(email)) return authErr('Enter a valid email address.', 'email');
     if (pw.length < 6) return authErr('Use at least 6 characters for your password.', 'pw');
     const noSchool = AUTHF.role === 'student' && !!($('#a-noschool') || {}).checked;
-    if (AUTHF.role !== 'trainer' && !noSchool) {
+    if (AUTHF.role !== 'trainer' && AUTHF.role !== 'parent' && !noSchool) {
       if (!v('school') || !Cloud.schoolId(v('school'))) return authErr(AUTHF.role === 'coach' ? 'Type the name of your school.' : 'Type your school’s name, or tick “I’m not at a school”.', 'school');
       if (AUTHF.role === 'student' && !v('grade')) return authErr('Choose your grade.', 'grade');
     }
@@ -95,7 +95,7 @@ async function submitAuth(form) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>' + (kind === 'signup' ? 'Creating account…' : 'Logging in…');
   try {
     const guest = REAL && REAL.profile && !Cloud.user ? REAL : null;
-    const noSch = AUTHF.role === 'trainer' || (AUTHF.role === 'student' && !!($('#a-noschool') || {}).checked), sid = noSch ? '' : Cloud.schoolId(v('school')), sname = noSch ? '' : (Cloud.isKnown(sid) ? Cloud.schoolName(sid) : v('school'));
+    const noSch = AUTHF.role === 'trainer' || AUTHF.role === 'parent' || (AUTHF.role === 'student' && !!($('#a-noschool') || {}).checked), sid = noSch ? '' : Cloud.schoolId(v('school')), sname = noSch ? '' : (Cloud.isKnown(sid) ? Cloud.schoolName(sid) : v('school'));
     if (kind === 'signup') await Cloud.signUp({ role: AUTHF.role, name: v('name'), email, password: pw, school: sid, schoolName: sname, grade: noSch ? '' : v('grade'), sports: AUTHF.role === 'coach' ? AUTHF.sports.slice() : [], coachCode: v('code') });
     else await Cloud.signIn(email, pw);
     await afterSignIn(guest, kind);
@@ -110,6 +110,7 @@ async function afterSignIn(guest, kind) {
   store.del('pulse.entry');
   Object.assign(COACH, { roster: [], pending: [], loaded: false, loading: false, err: '' });
   AUTHF = { role: 'student', sports: [] };
+  if (u.role === 'parent') { S = REAL = null; UI.screen = null; navigate('requests'); setTimeout(() => toast(`<b>Welcome, ${esc(u.name.split(' ')[0])}.</b> ${kind === 'signup' ? 'Check your email to verify it, then approve your child’s request.' : ''}`), 300); return; }
   if (u.role === 'trainer') { S = REAL = null; UI.screen = null; navigate('students'); setTimeout(() => toast(`<b>Welcome, ${esc(u.name.split(' ')[0])}.</b> ${kind === 'signup' ? 'Check your email to verify it, then add your first client.' : ''}`), 300); return; }
   if (u.role === 'coach') { S = REAL = null; UI.screen = null; navigate('students'); setTimeout(() => toast(`<b>Welcome, ${esc(u.name.split(' ')[0])}.</b> ${kind === 'signup' ? 'Your coach account is ready.' : ''}`), 300); return; }
   let cloud = null;

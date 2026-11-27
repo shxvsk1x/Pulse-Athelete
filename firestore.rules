@@ -39,7 +39,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       // students and trainers sign up freely; coaches need their school's access code
       allow create: if signedIn() && request.auth.uid == uid && (
-        request.resource.data.role == 'student' || request.resource.data.role == 'trainer' ||
+        request.resource.data.role == 'student' || request.resource.data.role == 'trainer' || request.resource.data.role == 'parent' ||
         (request.resource.data.role == 'coach'
           && !get(/databases/$(database)/documents/schools/$(request.resource.data.school)).data.get('suspended', false)
           && exists(/databases/$(database)/documents/schools/$(request.resource.data.school))
@@ -58,7 +58,9 @@ service cloud.firestore {
       allow read: if signedIn() && (resource.data.uid == request.auth.uid || coachOf(resource.data.school, resource.data.sport));
       allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid
         && id.matches(request.auth.uid + '_.*') && me().role == 'student'
-        && (!(request.resource.data.age is number) || request.resource.data.age >= 18 || request.resource.data.get('consent', null) != null);
+        && (!(request.resource.data.age is number) || request.resource.data.age >= 18
+          || (exists(/databases/$(database)/documents/parentConsents/$(request.auth.uid))
+              && get(/databases/$(database)/documents/parentConsents/$(request.auth.uid)).data.status == 'granted'));
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
@@ -167,6 +169,19 @@ service cloud.firestore {
       allow delete: if isCoach() && resource.data.school == me().school;
     }
 
+    // parent or guardian consent for a student under 18. The student asks (pending); only a parent account with a verified
+    // email that matches the address given can grant, decline or revoke. The student cannot grant it themselves.
+    match /parentConsents/{child} {
+      allow create: if signedIn() && child == request.auth.uid && me().role == 'student' && request.resource.data.child == request.auth.uid
+        && request.resource.data.status == 'pending' && request.resource.data.parentEmail is string && request.resource.data.parentEmail != request.auth.token.email;
+      allow get: if signedIn() && (child == request.auth.uid
+        || (request.auth.token.email_verified == true && resource.data.parentEmail == request.auth.token.email));
+      allow list: if signedIn() && request.auth.token.email_verified == true && resource.data.parentEmail == request.auth.token.email;
+      allow update: if signedIn() && me().role == 'parent' && request.auth.token.email_verified == true && resource.data.parentEmail == request.auth.token.email
+        && request.resource.data.child == resource.data.child && request.resource.data.parentEmail == resource.data.parentEmail
+        && request.resource.data.status in ['granted', 'declined', 'revoked'];
+      allow delete: if signedIn() && child == request.auth.uid;
+    }
     // reports: anyone signed in can file one about a message, person or entry; only the reporter and admins can read it
     match /reports/{id} {
       allow create: if signedIn() && request.resource.data.by == request.auth.uid && request.resource.data.text is string && request.resource.data.text.size() <= 800;
