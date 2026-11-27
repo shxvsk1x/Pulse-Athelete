@@ -540,7 +540,7 @@ VIEWS.today = () => {
   return `<div class="ph"><div><div class="label">${DAYS_L[wd(d)]} · ${fmtDate(d)}</div><h2 style="margin-top:8px">${greet()}, <em>${esc(p.name)}.</em></h2><p>${line}</p></div>
     <div class="ph-actions"><span class="pill line">Week ${i + 1} · ${ph.n}</span></div></div>
     <div class="dash stagger">
-      ${hydrationNote()}${weighInCard()}${adjustCard()}${missedCard()}
+      ${hydrationNote()}${weighInCard()}${adjustCard()}${missedCard()}${streakCard()}
       <section class="card card-pad c-7" aria-labelledby="t-sess">${todaySessionCard(sess, done)}</section>
       <section class="card water-card c-5">${waterCard()}</section>
       <section class="card c-6" aria-labelledby="t-ready">${readinessCard()}</section>
